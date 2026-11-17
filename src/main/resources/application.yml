@@ -1,0 +1,53 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: cce-admin-service
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/ccedb}
+    username: ${DATABASE_USERNAME:cce_user}
+    password: ${DATABASE_PASSWORD:cce_pass}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          lob:
+            non_contextual_creation: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    table: flyway_schema_history_admin
+    baseline-on-migrate: true
+    baseline-version: ${CCE_FLYWAY_BASELINE_VERSION:0}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER:http://localhost:8081/realms/cce}
+          jwk-set-uri: ${JWT_ISSUER:http://localhost:8081/realms/cce}/protocol/openid-connect/certs
+
+jwt:
+  audience: ${JWT_AUDIENCE:account}
+  roles-claim-path: ${JWT_ROLES_CLAIM_PATH:realm_access.roles}
+
+keycloak:
+  server-url: ${KEYCLOAK_SERVER_URL:http://localhost:8081}
+  realm: ${KEYCLOAK_TARGET_REALM:cce}
+  admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:admin-cli}
+  admin-client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:}
+  admin-username: ${KEYCLOAK_ADMIN_USERNAME:admin}
+  admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    org.openphc.cce.admin: INFO

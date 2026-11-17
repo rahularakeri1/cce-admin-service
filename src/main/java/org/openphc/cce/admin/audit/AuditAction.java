@@ -1,0 +1,20 @@
+package org.openphc.cce.admin.audit;
+
+/** See docs/data-dictionary.md §2.2 — minimum set, not exhaustive. */
+public enum AuditAction {
+  USER_CREATED,
+  USER_PROVISIONING_FAILED,
+  USER_UPDATED,
+  USER_DEACTIVATED,
+  USER_REACTIVATED,
+  USER_ROLES_UPDATED,
+  USER_PASSWORD_RESET,
+  ROLE_CREATED,
+  ROLE_UPDATED,
+  ROLE_DELETED,
+  ROLE_MENUS_UPDATED,
+  ROLE_PERMISSIONS_UPDATED,
+  MENU_CREATED,
+  MENU_UPDATED,
+  MENU_DELETED
+}
