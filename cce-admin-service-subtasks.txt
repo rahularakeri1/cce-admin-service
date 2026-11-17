@@ -1,0 +1,787 @@
+================================================================================
+  CCE ADMIN SERVICE — DEVELOPMENT SUB-TASKS (Sequential)
+================================================================================
+
+Service:        cce-admin-service
+Branch:         feature/admin-service
+Port:           8085
+Tech Stack:     Java 21, Spring Boot 3.x, Spring Web MVC (blocking), PostgreSQL 16+
+                (shared `ccedb`, `public` schema), Spring Data JPA + Hibernate, Flyway,
+                spring-boot-starter-oauth2-resource-server (JWKS), keycloak-admin-client,
+                springdoc-openapi, Maven
+Reference Docs: docs/ (6 files) — architecture-overview.md, data-dictionary.md,
+                api-reference.md, flow-diagrams.md, developer-setup.md, deployment-guide.md
+Source:         CCE_Admin_Module_PRD.pdf (29 Oct 2026)
+
+Each sub-task below should be completed as a separate commit/PR-ready increment.
+Tasks are ordered by dependency — each builds on the prior. "docs is source of
+truth" rule: any sub-task that changes a contract, schema or behaviour described
+in docs/ MUST update the relevant doc file in the SAME PR — a PR that changes
+code without the matching doc update is incomplete, even if tests pass.
+
+================================================================================
+ARCHITECTURE SUMMARY (must be understood before reading sub-tasks)
+================================================================================
+
+  - SHARED DATABASE: all tables live in `ccedb`'s `public` schema — the SAME
+    database/schema every other CCE service already uses. There is NO separate
+    `admin_service` database, despite that being what the PRD's own diagram and
+    gateway-service's repo docs describe — confirmed against the real dev
+    instance. This service's own Flyway ledger is `flyway_schema_history_admin`.
+  - SIX tables owned by this service: users, roles, menus, role_menus,
+    user_roles, admin_audit_log (all UUID PKs). A SEVENTH table, `api_permissions`,
+    already exists in the same schema, owned by gateway-service — this service
+    reads and writes ROWS into it but never creates or alters its DDL. Its `id`
+    is BIGSERIAL/Long, not UUID — the one deliberate exception.
+  - TWO INDEPENDENT AXES: Role->Menu (soft control, cosmetic if wrong) and
+    Role->Permission (hard control, gateway-enforced) are configured and saved
+    completely independently. Never derive one from the other.
+  - ONE IDENTIFIER, THREE SYSTEMS: roles.name = Keycloak realm role name =
+    api_permissions.permission_name. Immutable after creation.
+  - FULL-REPLACEMENT SEMANTICS on every "set" endpoint (user roles, role menus,
+    role permissions) — the payload is always the complete desired set; the
+    backend diffs against current state to compute what actually changed in
+    Keycloak, but the local DB write replaces the full set.
+  - DEFENSE IN DEPTH: this service re-validates every JWT independently of
+    gateway-service's own check (signature, iss, aud, exp) and additionally
+    resolves the JWT's `email` claim to a local user, rejecting if missing or
+    not ACTIVE. (Changed from the PRD's `sub`/`keycloak_id` join — see
+    data-dictionary.md §1.1 for the trade-off this accepts.)
+  - TWO DIFFERENT PARTIAL-FAILURE STRATEGIES, per flow, not one universal
+    rule (see flow-diagrams.md and architecture-overview.md §7):
+      - User creation (Flow 2) is LOCAL-FIRST WITH ROLLBACK: local insert
+        happens inside an open transaction before either Keycloak call; a
+        Keycloak failure, or a commit failure after both Keycloak calls
+        already succeeded, rolls the transaction back. A Keycloak account-
+        creation failure that's ambiguous (timeout, not a definitive
+        rejection) carries an ACCEPTED residual risk of a silent,
+        untraceable orphan — a deliberate trade-off, not a bug. Once
+        Keycloak's account creation is CONFIRMED (role assignment fails
+        afterward, or the commit itself fails), that's always traceable: a
+        USER_PROVISIONING_FAILED audit row is written in its own,
+        separately-committed transaction (entity_id = the Keycloak
+        account's own id) BEFORE the rollback — this needs explicit code at
+        BOTH of those failure points, it does not happen automatically.
+      - Role -> permission sync (Flow 4) is the OPPOSITE: the local DB
+        write commits first and is KEPT regardless of whether the gateway
+        sync succeeds — never rolled back, just flagged via a manual
+        Re-sync action.
+    Nothing is retried automatically in either flow. The invite email (see
+    below) never fires unless Flow 2's commit actually succeeds.
+  - AUTOMATIC INVITE EMAIL: POST /users triggers a combined VERIFY_EMAIL +
+    UPDATE_PASSWORD Keycloak action email (72h link) as the LAST step of
+    creation, after USER_CREATED is audited — not a separate admin action.
+    POST /users/:id/reset-password reuses the same mechanism as a manual
+    resend/reset. A failed send is non-fatal (still 201, with a `warnings`
+    entry) — never retried automatically.
+  - AUDIT_LOG IS APPEND-ONLY: every mutating endpoint writes exactly one row,
+    written through a single AuditLogWriter — no service class inserts into
+    admin_audit_log directly.
+  - NO HARD DELETE of users this release — deactivation (INACTIVE) is terminal
+    and keeps user_roles rows for re-activation.
+
+================================================================================
+SUB-TASK A0: Service Design Documents — PR for Customer Review
+================================================================================
+
+DESCRIPTION:
+  The design documentation already exists in docs/ (6 files, drafted this
+  session against the PRD and verified against the real running platform —
+  gateway-service's actual code, the real k8s overlays, and a live dev
+  database). Raise it as a PR for review and sign-off BEFORE any
+  implementation sub-task (A1+) begins, same gate the PRD itself requires.
+
+DELIVERABLES:
+  Submit docs/ as a single PR:
+  1. architecture-overview.md — responsibility, the two-axes/one-identifier
+     design, system context + request-lifecycle diagrams, package layout,
+     consistency model, and Section 9 "Open architectural decisions" (now
+     mostly resolved — confirm the two still-open items: role claim path
+     pre-deploy check, S9.3 role-taxonomy migration plan).
+  2. data-dictionary.md — all 6 owned tables + api_permissions (read-only to
+     this service), fully typed, with the ccedb/public resolution documented.
+  3. api-reference.md — every endpoint, hand-written, alongside the generated
+     Swagger (not instead of it).
+  4. flow-diagrams.md — user creation, role-assignment diff, permission
+     replacement + sync, manual re-sync, sidebar render.
+  5. developer-setup.md — points at the EXISTING shared local infra
+     (deploy-scripts/local), not a new docker-compose stack.
+  6. deployment-guide.md — ccedb topology, config parity with gateway-service,
+     first-deploy bootstrap sequencing.
+
+PR REVIEW CHECKLIST:
+  - [ ] ccedb/public schema topology confirmed with whoever owns gateway-service
+        and deploy-scripts (this is an infra decision, not just a doc choice)
+  - [ ] api_permissions.id staying BIGSERIAL confirmed
+  - [ ] JWT_ROLES_CLAIM_PATH (realm_access.roles default) accepted, pre-deploy
+        verification step tracked
+  - [ ] Bootstrap mechanism for first SUPER_ADMIN + GET /me/menus permission
+        row decided (who seeds it, which environments)
+  - [ ] Read-only Auditor persona explicitly deferred (not silently dropped)
+  - [ ] Keycloak client naming (cce-admin-ui) agreed, added to
+        k8s/seeds/cce-realm.json plan
+
+ACCEPTANCE CRITERIA:
+  - PR raised with all 6 documents
+  - Reviewer sign-off on the open items above
+  - Any feedback incorporated as doc updates
+  - PR merged before A1 begins
+
+================================================================================
+SUB-TASK A1: Project Scaffolding & Build Configuration
+================================================================================
+
+DESCRIPTION:
+  Initialize the Spring Boot Maven project, package layout and base
+  configuration. No business logic yet — this task only needs to boot.
+
+DELIVERABLES:
+  1. pom.xml:
+     - parent: spring-boot-starter-parent 3.3.x (or latest 3.x patch)
+     - java.version: 21
+     - Dependencies: spring-boot-starter-web, spring-boot-starter-data-jpa,
+       spring-boot-starter-oauth2-resource-server, spring-boot-starter-validation,
+       postgresql (runtime), flyway-core + flyway-database-postgresql,
+       org.keycloak:keycloak-admin-client, springdoc-openapi-starter-webmvc-ui,
+       spring-boot-starter-test (test)
+  2. Package structure under org.openphc.cce.admin:
+     - config/   controller/   dto/   entity/   repository/
+     - security/   exception/   audit/   client/
+     (matches docs/architecture-overview.md §6 exactly)
+  3. application.yml (profiles: default, docker):
+     - server.port: 8085
+     - spring.datasource → ccedb (NOT a dedicated admin_service database)
+     - spring.jpa.hibernate.ddl-auto: validate
+     - spring.flyway: enabled, locations classpath:db/migration
+     - jwt.issuer / jwt.audience / jwt.roles-claim-path (env-overridable,
+       default realm_access.roles — matches gateway-service's own default)
+     - springdoc: enabled, swagger-ui path
+  4. AdminServiceApplication.java
+  5. Dockerfile (multi-stage: Maven build → JRE runtime, port 8085)
+  6. .gitignore, README.md (stub — filled in at A16)
+
+ACCEPTANCE CRITERIA:
+  - `mvn spring-boot:run` boots successfully against the shared local
+    PostgreSQL (deploy-scripts/local) with zero business tables yet
+  - `mvn verify` passes (no tests yet is fine, but the build must be green)
+  - Docker image builds
+
+================================================================================
+SUB-TASK A2: Database Migration — V1, Six Owned Tables
+================================================================================
+
+DESCRIPTION:
+  Write the Flyway migration for the six tables this service owns, straight
+  from data-dictionary.md §1.1-1.5 and §1.7. Do NOT create or alter
+  api_permissions — it already exists, owned by gateway-service.
+
+DELIVERABLES:
+  1. V1__create_admin_service_schema.sql:
+     - users (UUID PK, username, email UNIQUE, first_name, last_name, status,
+       facility_scope, last_login_at, timestamps) — no keycloak_id column;
+       email is the JWT-resolution join key (simplified from the PRD, see
+       data-dictionary.md §1.1)
+     - roles (UUID PK, name UNIQUE, display_name, description, is_system,
+       timestamps)
+     - menus (UUID PK, menu_key UNIQUE, label, path, icon, sort_order,
+       is_active, timestamps) — flat catalog, no type/parent_id (simplified
+       from the PRD's NAV/DETAIL model, see data-dictionary.md §1.3)
+     - role_menus (composite PK role_id+menu_id, both FK ON DELETE CASCADE)
+     - user_roles (composite PK user_id+role_id, user_id FK CASCADE,
+       role_id FK RESTRICT)
+     - admin_audit_log (UUID PK, actor_id, action, entity_type, entity_id,
+       before/after JSONB, ip_address, created_at — append-only, no
+       updated_at)
+     - All indexes listed in data-dictionary.md §1 per table
+     - `CREATE EXTENSION IF NOT EXISTS pgcrypto` guarded (check first whether
+       another service sharing ccedb already enabled it — don't fail if so)
+  2. Confirm this migration's Flyway history table name resolves to
+     `flyway_schema_history_admin` (per-service ledger convention already used
+     by flyway_schema_history_protocol, _compliance, _scheduler, etc. in this
+     same database) — set `spring.flyway.table` explicitly, don't rely on the
+     default `flyway_schema_history` name, which would collide with whichever
+     service claimed that exact name first.
+
+ACCEPTANCE CRITERIA:
+  - Migration runs cleanly against the shared ccedb (local infra) without
+    touching api_permissions or any other service's tables
+  - `\dt` shows all 6 new tables plus the pre-existing api_permissions,
+    unchanged
+  - A reviewer diffs every column against data-dictionary.md §1 before merge
+  - Migration is idempotent on re-run (Flyway checksum stable)
+
+================================================================================
+SUB-TASK A3: JPA Entities, Repositories & AuditLogWriter
+================================================================================
+
+DESCRIPTION:
+  Map the six owned tables to JPA entities with repositories, plus a
+  READ/WRITE (not DDL-owning) mapping for the existing api_permissions table,
+  and the single service that writes admin_audit_log.
+
+DELIVERABLES:
+  1. entity/: User, UserStatus (enum), Role, Menu, RoleMenu (+ composite key),
+     UserRole (+ composite key), ApiPermission (BIGSERIAL Long id — mirrors
+     gateway-service's existing entity exactly, do not introduce a second,
+     divergent mapping), AuditLog
+  2. repository/: one Spring Data JPA repository per entity above
+  3. audit/AuditLogWriter.java — the ONLY class that inserts into admin_audit_log.
+     Signature: write(actorId, action, entityType, entityId, before, after,
+     ipAddress). No service class should call auditLogRepository directly.
+  4. audit/AuditAction.java — enum per data-dictionary.md §2.2 (USER_CREATED,
+     USER_UPDATED, USER_DEACTIVATED, USER_REACTIVATED, USER_ROLES_UPDATED,
+     USER_PASSWORD_RESET, ROLE_CREATED, ROLE_UPDATED, ROLE_DELETED,
+     ROLE_MENUS_UPDATED, ROLE_PERMISSIONS_UPDATED, MENU_CREATED,
+     MENU_UPDATED, MENU_DELETED)
+  5. Unit/slice tests: each repository's save/find round-trips correctly
+     against the real schema from A2 (Testcontainers or the shared local
+     Postgres)
+
+ACCEPTANCE CRITERIA:
+  - Every entity matches the A2 DDL exactly (Hibernate schema validation
+    passes with ddl-auto: validate)
+  - ApiPermission entity's column mapping matches gateway-service's own
+    ApiPermission.java field-for-field (id Long, permissionName, httpMethod,
+    uriPattern, description, resourceCategory)
+  - AuditLogWriter is the only class with a dependency on AuditLogRepository
+
+================================================================================
+SUB-TASK A4: Response Envelope, Pagination & Global Exception Handling
+================================================================================
+
+DESCRIPTION:
+  Build the cross-cutting HTTP contract every later endpoint depends on:
+  the success/error envelope, pagination block, and the exception->error-code
+  mapping. Per the PRD's own milestone note, do this early — every later
+  sub-task depends on it.
+
+DELIVERABLES:
+  1. dto/ApiResponse.java — { data, pagination? }
+  2. dto/ApiErrorBody.java — { error: { code, message } }
+  3. dto/PageMeta.java — { page, pageSize, total } (default pageSize 20,
+     max 100 — reject or clamp a pageSize above 100, document which)
+  4. exception/: domain exceptions mapping 1:1 to the error codes table in
+     api-reference.md — ValidationException (400), UnauthenticatedException
+     (401, though Spring Security usually short-circuits this one),
+     ForbiddenException (403), NotFoundException (404, parameterized by
+     entity type for USER_NOT_FOUND/ROLE_NOT_FOUND/MENU_NOT_FOUND),
+     ConflictException (409, parameterized by code for DUPLICATE_ROLE_NAME /
+     DUPLICATE_MENU_KEY / EMAIL_IN_USE / ROLE_IN_USE /
+     SYSTEM_ROLE_IMMUTABLE), SyncFailedException (502
+     KEYCLOAK_SYNC_FAILED)
+  5. exception/GlobalExceptionHandler.java — @RestControllerAdvice mapping
+     each exception above (and MethodArgumentNotValidException) to its HTTP
+     status + code, wrapped in ApiErrorBody
+
+ACCEPTANCE CRITERIA:
+  - Every code in api-reference.md's Error Codes table is producible by at
+    least one exception type
+  - A test per exception type asserts the correct HTTP status + code body
+  - No endpoint exists yet that throws these — that's fine, this task is the
+    foundation later tasks wire into
+
+================================================================================
+SUB-TASK A5: Health Endpoint & OpenAPI/Swagger
+================================================================================
+
+DESCRIPTION:
+  Add the one unauthenticated endpoint and generated API documentation.
+
+DELIVERABLES:
+  1. controller/HealthController.java — GET /admin/v1/health, unauthenticated,
+     best-effort DB status (a DB outage must not make this endpoint itself
+     throw — report degraded status in the body)
+  2. config/OpenApiConfig.java — springdoc bean with service title/description
+  3. Security config permits /admin/v1/health and the swagger/openapi paths
+     without auth (everything else still locked down even though no business
+     endpoint exists yet — see A6)
+
+ACCEPTANCE CRITERIA:
+  - GET /admin/v1/health returns 200 { "status": "UP" } with no token
+  - /swagger-ui.html loads (empty-ish since no business endpoints exist yet)
+  - Health check still returns a response (degraded, not a 500) with the DB
+    stopped — verify by stopping the local Postgres container
+
+================================================================================
+SUB-TASK A6: JWT Re-validation, Role Claim Resolution & Current-User Check
+================================================================================
+
+DESCRIPTION:
+  Implement B-10 through B-13: independent JWT validation, role claim
+  resolution, and local-user/ACTIVE-status enforcement. This is the security
+  backbone every business endpoint sits behind.
+
+DELIVERABLES:
+  1. config/SecurityConfig.java — spring-boot-starter-oauth2-resource-server
+     with JWKS; every /admin/v1/** path authenticated except /health and
+     swagger (A5); signature, iss, aud, exp validated — failure -> 401
+     UNAUTHENTICATED
+  2. security/JwtRoleConverter.java — reads roles from the configurable
+     JWT_ROLES_CLAIM_PATH (default realm_access.roles, dot-notation support
+     for nested paths like resource_access.gateway-service.roles) — unit test
+     both the default path AND a client-role-style nested path, since
+     architecture-overview.md §9.2 flags this as unconfirmed for the real
+     target realm
+  3. security/CurrentUserResolver.java (filter or converter) — resolves the
+     JWT's `email` claim to a local `users` row (SELECT ... WHERE email = ?;
+     simplified from the PRD's `sub`/`keycloak_id` join, see
+     data-dictionary.md §1.1 for the accepted trade-off); missing row or
+     status != ACTIVE -> 403 FORBIDDEN (not 401 — the token itself is valid)
+  4. security/CurrentUser.java — simple holder (id, username, roles,
+     facilityScope) available to controllers via an argument resolver or
+     a request-scoped bean
+  5. No secrets in the repo (B-13) — all Keycloak/DB credentials via env
+     vars; confirm no local-dev default is wired into a non-local profile
+
+ACCEPTANCE CRITERIA:
+  - A request to any /admin/v1/** path (even a nonexistent one — Spring
+    Security runs before routing) with no token -> 401 UNAUTHENTICATED
+  - A request with a validly-signed token whose `email` claim matches no local user row
+    -> 403 FORBIDDEN
+  - A request with a validly-signed token for a local user with
+    status=INACTIVE -> 403 FORBIDDEN
+  - JwtRoleConverter correctly parses both realm_access.roles and a nested
+    resource_access.<client>.roles path from the SAME converter via config,
+    with a unit test for each
+
+================================================================================
+SUB-TASK A7: Seed Migration — Menus, SUPER_ADMIN & Bootstrap Permissions
+================================================================================
+
+DESCRIPTION:
+  Seed the data nothing else can bootstrap from: the 12 cce-insights-ui
+  menus, the SUPER_ADMIN system role, and the api_permissions rows that let
+  SUPER_ADMIN actually call this service's own endpoints (including its own
+  GET /me/menus — without this row, no console in the platform can ever load
+  a sidebar).
+
+DELIVERABLES:
+  1. V2__seed.sql:
+     - Flat menu rows matching cce-insights-ui's real sidebar routes:
+       Dashboard, Facilities, Compliance, Deviations, Patients, Events,
+       Ingestion (the 7 real sidebar links — see the UAT screenshot this was
+       verified against; simplified from the PRD's 12-menu NAV/DETAIL model,
+       data-dictionary.md §1.3) — cross-check against
+       cce-insights-ui/docs/architecture-overview.md §4 before writing this,
+       don't invent paths
+     - SUPER_ADMIN role row, is_system = true
+     - role_menus rows: SUPER_ADMIN -> all seeded menus
+     - api_permissions rows (inserted, not DDL) for at minimum:
+       GET /admin/v1/me, GET /admin/v1/me/menus, and every /admin/v1/**
+       pattern SUPER_ADMIN needs — permission_name = 'SUPER_ADMIN'
+  2. Decide and document the per-environment re-run story: this seed is
+     Flyway-versioned so it runs once per environment automatically, but the
+     actual bootstrap Keycloak account (realm role + user) for the first
+     SUPER_ADMIN is NOT created by this migration — document that as a
+     manual/scripted step in deployment-guide.md (already flagged as
+     unresolved in architecture-overview.md §9.4 — resolve it here)
+
+ACCEPTANCE CRITERIA:
+  - Fresh environment: after A2+A7 migrations and a manually-provisioned
+    Keycloak SUPER_ADMIN account, GET /admin/v1/me/menus for that user
+    returns all seeded menus (once A8 exists to test it against)
+  - Reviewer confirms the menus match cce-insights-ui's real sidebar routes,
+    not a guessed list
+
+================================================================================
+SUB-TASK A8: Current User Endpoints — GET /me, GET /me/menus
+================================================================================
+
+DESCRIPTION:
+  The first real business endpoints, and the simplest possible end-to-end
+  proof the security chain (A6) and seed data (A7) work together.
+
+DELIVERABLES:
+  1. controller/MeController.java:
+     - GET /admin/v1/me -> { id, username, roles[], facilityScope }. Also
+       updates users.last_login_at as a side effect: read the JWT's
+       auth_time claim (the real login moment — constant across token
+       refreshes, unlike iat) and UPDATE users SET last_login_at =
+       <auth_time> WHERE id = :currentUserId AND (last_login_at IS NULL OR
+       last_login_at < now() - interval '5 minutes'). No new endpoint, no
+       Keycloak webhook — resolves the PRD §12 "mechanism not yet
+       specified" gap (see data-dictionary.md §1.1). auth_time is NOT
+       guaranteed present (same caveat as email — depends on the client's
+       Keycloak scope/mapper config, or a max_age auth request param) —
+       fall back to now() if the claim is absent, don't just skip the
+       update. Confirm cce-admin-ui's and cce-insights-ui's Keycloak client
+       config actually includes it before assuming the primary path works
+     - GET /admin/v1/me/menus -> flat union of menus across all CurrentUser's
+       roles, is_active only, ordered by sort_order
+  2. service/MenuUnionService.java — the union/de-dup logic, unit tested
+     separately from the controller (two roles with overlapping menus must
+     produce the correct de-duplicated list — PRD milestone B5 exit check)
+
+ACCEPTANCE CRITERIA:
+  - Logged in as the bootstrap SUPER_ADMIN (A7), GET /me/menus returns all
+    seeded menus
+  - A user with two roles whose menu sets overlap gets the union, not
+    duplicates
+  - A user with a role that has an inactive menu assigned does not see it
+  - First GET /me call for a user sets last_login_at from auth_time; a
+    second GET /me call within 5 minutes does NOT issue another UPDATE
+    (verify via query count or an unchanged updated-at-style marker in the
+    test)
+
+================================================================================
+SUB-TASK A9: Users — List & Create (Keycloak Provisioning)
+================================================================================
+
+DESCRIPTION:
+  First endpoint that talks to Keycloak. Implements B-30, B-31, B-32 and the
+  flow in flow-diagrams.md "Flow 2 — User creation" exactly, including the
+  partial-failure path.
+
+DELIVERABLES:
+  1. client/KeycloakGateway.java (interface) + its real implementation
+     wrapping keycloak-admin-client — createUser, assignRealmRoles,
+     executeActionsEmail(userId, ["VERIFY_EMAIL","UPDATE_PASSWORD"], lifespan).
+     Wrapped behind an interface specifically so service-layer tests can
+     mock it without a running Keycloak (milestone B3 note)
+  2. controller/UserController.java + service layer — LOCAL-FIRST ordering
+     (changed from an earlier Keycloak-first draft — see flow-diagrams.md
+     Flow 2 for the full reasoning):
+     - GET /admin/v1/users — filters status/roleId/facilityScope/q,
+       paginated (B-30)
+     - POST /admin/v1/users — validate -> check email uniqueness -> BEGIN
+       transaction -> insert users + user_roles rows -> insert
+       USER_CREATED audit row (both uncommitted) -> create Keycloak user ->
+       assign realm roles -> COMMIT -> trigger combined
+       VERIFY_EMAIL+UPDATE_PASSWORD action email (lifespan = 72h, matching
+       the onboard-insights-user.sh precedent elsewhere in this platform)
+       -> 201 (B-31). The transaction stays open across BOTH Keycloak calls
+       — a @Transactional method boundary (or equivalent), not two separate
+       commits
+     - If EITHER Keycloak call fails: ROLL BACK the transaction (local row
+       + audit row both vanish) -> 502 KEYCLOAK_SYNC_FAILED. If the account-
+       creation call's failure was ambiguous (a timeout, not a definitive
+       rejection), Keycloak may have actually succeeded anyway — this is an
+       ACCEPTED residual risk of this ordering (a silent, untraceable orphan
+       in that rare case), not something this milestone needs to detect
+     - If role assignment fails SPECIFICALLY, or the final COMMIT itself
+       fails AFTER both Keycloak calls already succeeded: Keycloak's
+       account creation is confirmed (not ambiguous) in both these cases,
+       so BOTH need the SAME explicit handling — write a
+       USER_PROVISIONING_FAILED row in its own, separately-committed
+       transaction (entity_type='USER', entity_id = the Keycloak account's
+       own id, after = {keycloakId, username, email, reason}) BEFORE
+       rolling back the main transaction -> 502 KEYCLOAK_SYNC_FAILED. This
+       does NOT happen automatically — the commit boundary itself must be
+       wrapped in a catch block that fires this same reconciliation-write
+       path, not just the two Keycloak calls
+     - The email step only runs after a successful COMMIT. If the email
+       send itself fails: do NOT fail the request. Still 201, with a
+       `warnings` array entry, and the same USER_CREATED audit row's
+       `after` JSON gets `"inviteEmailSent": false`. No retry.
+  3. Service-layer tests with KeycloakGateway mocked:
+     - happy path -> 201, USER_CREATED audit row present, executeActionsEmail
+       called exactly once with both required actions
+     - email already exists -> 409 EMAIL_IN_USE, NO transaction opened, NO
+       Keycloak call made (verify the mock was never invoked)
+     - Keycloak account creation forced to fail -> 502, transaction rolled
+       back, NO admin_audit_log row of any kind persists (nothing to
+       reconcile for this specific failure point)
+     - Keycloak account succeeds, role assignment forced to fail -> 502,
+       USER_PROVISIONING_FAILED audit row present with entity_id = the
+       Keycloak account id, main transaction rolled back (no users row)
+     - Keycloak + both calls succeed, COMMIT itself forced to fail (e.g.
+       simulate a connection drop at commit time) -> 502,
+       USER_PROVISIONING_FAILED audit row present — same as the
+       role-assignment-failure case, proving the commit boundary is
+       explicitly guarded too, not just the Keycloak calls
+     - Keycloak + DB succeed, executeActionsEmail forced to fail -> still
+       201, response has a `warnings` entry, USER_CREATED audit row's after
+       JSON has inviteEmailSent=false
+
+ACCEPTANCE CRITERIA:
+  - Scenario S2 from the PRD (admin onboards a new user with roles) passes
+    against the real local Keycloak, including receiving the real
+    combined-action email
+  - Validation and uniqueness checks happen BEFORE any transaction is
+    opened or any Keycloak call made (test asserts zero Keycloak calls on a
+    409)
+  - A forced Keycloak account-creation failure rolls back cleanly with NO
+    audit row written at all
+  - A forced role-assignment failure AND a forced commit-after-success
+    failure BOTH produce exactly one USER_PROVISIONING_FAILED audit row
+    containing the Keycloak account id, and trigger no email — these are
+    two distinct code paths that must both be covered, not one
+  - A forced email-send failure after a fully successful creation still
+    returns 201, not 502
+
+================================================================================
+SUB-TASK A10: Users — Fetch, Update, Status, Roles, Password Reset
+================================================================================
+
+DESCRIPTION:
+  Remaining user endpoints: B-33 through B-36, including the full-replacement
+  role-diff logic from flow-diagrams.md "Flow 3".
+
+DELIVERABLES:
+  1. GET /admin/v1/users/:id, PUT /admin/v1/users/:id (profile fields only —
+     not status, not roles) — 404 USER_NOT_FOUND for unknown id (B-33)
+  2. PATCH /admin/v1/users/:id/status — INACTIVE disables the Keycloak
+     account, keeps user_roles rows; ACTIVE re-enables without re-selecting
+     roles. Audit USER_DEACTIVATED / USER_REACTIVATED (B-34)
+  3. PUT /admin/v1/users/:id/roles — full desired set in the payload; diff
+     against current user_roles to compute added/removed; touch only the
+     changed realm roles in Keycloak via KeycloakGateway. Audit
+     USER_ROLES_UPDATED with before/after sets (B-35)
+  4. POST /admin/v1/users/:id/reset-password — triggers the SAME combined
+     VERIFY_EMAIL+UPDATE_PASSWORD action email as creation (A9), reusing
+     KeycloakGateway.executeActionsEmail; no password ever passes through
+     this service (B-36). Doubles as both "resend" (original creation email
+     expired/lost/failed) and a genuine security reset for an
+     already-onboarded user — same call, no distinction needed server-side
+  5. Extend KeycloakGateway: assignRealmRoles/removeRealmRoles (plural,
+     targeted), disableUser/enableUser (executeActionsEmail already added
+     in A9 — reuse it here, don't duplicate)
+  6. Tests: role diff with 5 existing roles + 1 added = exactly one
+     Keycloak assign call, zero remove calls (verifies "touch only the
+     changed ones", not a full re-sync)
+
+ACCEPTANCE CRITERIA:
+  - Scenario S4 (admin changes a user's roles) and S5 (admin deactivates a
+    user) pass against the real local Keycloak
+  - Deactivating then reactivating a user restores access without
+    re-selecting roles, verified via user_roles row count before/after
+
+================================================================================
+SUB-TASK A11: Roles CRUD
+================================================================================
+
+DESCRIPTION:
+  B-40. Role name is immutable after creation; delete is guarded.
+
+DELIVERABLES:
+  1. controller/RoleController.java:
+     - GET /admin/v1/roles — list
+     - POST /admin/v1/roles — name UPPER_SNAKE_CASE validated, 409
+       DUPLICATE_ROLE_NAME on conflict
+     - GET /admin/v1/roles/:id
+     - PUT /admin/v1/roles/:id — displayName/description only; a `name` in
+       the body is ignored, not rejected (confirm this choice against the
+       team before merge — api-reference.md flags it as unconfirmed)
+     - DELETE /admin/v1/roles/:id — service-layer check (not a bare FK
+       violation): 409 ROLE_IN_USE if any user_roles reference it, 409
+       SYSTEM_ROLE_IMMUTABLE if is_system = true
+  2. Audit ROLE_CREATED / ROLE_UPDATED / ROLE_DELETED
+
+ACCEPTANCE CRITERIA:
+  - Attempting to delete SUPER_ADMIN -> 409 SYSTEM_ROLE_IMMUTABLE, not a
+    500 from a foreign-key violation
+  - Attempting to delete a role with an assigned user -> 409 ROLE_IN_USE
+  - PRD milestone B2 exit check: create a role, confirm it's returned by
+    GET /roles
+
+================================================================================
+SUB-TASK A12: Role -> Menus Assignment
+================================================================================
+
+DESCRIPTION:
+  B-41. Full-replacement semantics over a flat menu set (simplified from the
+  PRD's NAV/DETAIL model — see data-dictionary.md §1.3 — so there is no
+  parent-menu warning case to handle).
+
+DELIVERABLES:
+  1. GET /admin/v1/roles/:id/menus — current menu ids for the role
+  2. PUT /admin/v1/roles/:id/menus — replaces role_menus for this role in one
+     transaction with the submitted set
+  3. Audit ROLE_MENUS_UPDATED
+
+ACCEPTANCE CRITERIA:
+  - PRD milestone B2 exit check: map menus to a role via Swagger, confirm
+    GET /roles/:id/menus reflects the saved set
+  - Saving the same set twice in a row still succeeds (idempotent) and still
+    writes an audit row (every mutation audits, even a no-op set)
+
+================================================================================
+SUB-TASK A13: Role -> Permissions Assignment & Gateway Sync
+================================================================================
+
+DESCRIPTION:
+  B-42, B-43. The highest-risk endpoint in the service — it is the only one
+  that writes to api_permissions (a table owned by gateway-service) and the
+  only one that calls out to gateway-service itself. Implements
+  flow-diagrams.md "Flow 4" and "Flow 5" exactly.
+
+DELIVERABLES:
+  1. client/GatewaySyncClient.java (interface + implementation) — wraps
+     POST {gateway-url}/api/permissions/sync-to-keycloak. Interface-wrapped
+     so it can be mocked/no-op'd in tests and local dev without a running
+     gateway-service (PRD §10 local setup note)
+  2. GET /admin/v1/roles/:id/permissions — current permission rows for the
+     role (reading FROM the existing api_permissions table, filtered by
+     permission_name = role.name)
+  3. PUT /admin/v1/roles/:id/permissions:
+     - replace api_permissions rows where permission_name = role.name, in
+       ONE DB transaction (insert/update/delete rows as needed to match the
+       submitted set exactly)
+     - commit the transaction
+     - THEN call GatewaySyncClient — if it fails, return 502
+       KEYCLOAK_SYNC_FAILED but KEEP the already-committed DB change (do not
+       roll back)
+     - audit ROLE_PERMISSIONS_UPDATED regardless of sync outcome (the DB
+       state did change)
+  4. POST /admin/v1/roles/:id/sync — re-runs GatewaySyncClient without
+     touching any row (the manual "Re-sync" action, scenario S6)
+
+ACCEPTANCE CRITERIA:
+  - A simulated gateway-sync failure (mock throws) still leaves the DB
+    change committed — verify by reading api_permissions rows back after the
+    502 response
+  - Scenario S6 (gateway sync fails after a permission save; re-sync
+    succeeds) passes end to end
+  - PRD milestone B4 exit check: permissions saved, sync client called,
+    simulated failure returns 502
+  - A role's realm role must exist (confirmed synced) before it can be
+    assigned to a user — add an explicit check or document why this is
+    enforced procedurally rather than in code (open question, resolve here)
+
+================================================================================
+SUB-TASK A14: Menus Catalog CRUD
+================================================================================
+
+DESCRIPTION:
+  B-44. Independent of roles — this manages the catalog itself, not any
+  role's selection from it.
+
+DELIVERABLES:
+  1. controller/MenuController.java:
+     - GET /admin/v1/menus — full catalog, flat list, ordered by sort_order
+     - POST /admin/v1/menus — 409 DUPLICATE_MENU_KEY on conflict
+     - PUT /admin/v1/menus/:id
+     - DELETE /admin/v1/menus/:id — also deletes the menu's role_menus rows
+       (every role that had it loses the assignment)
+  2. Audit MENU_CREATED / MENU_UPDATED / MENU_DELETED
+
+ACCEPTANCE CRITERIA:
+  - PRD milestone F5-equivalent backend check: add a menu, deactivate it,
+    confirm GET /me/menus for a role holding it no longer returns it
+  - Deleting a menu removes exactly its own role_menus rows, no others
+
+================================================================================
+SUB-TASK A15: Integration Test Suite — Scenarios S1-S6
+================================================================================
+
+DESCRIPTION:
+  Run the PRD's six core scenarios end to end against the real local
+  Postgres + Keycloak (deploy-scripts/local) — not mocks. This is the E2E
+  milestone gate; nothing is "done" until this passes.
+
+DELIVERABLES:
+  1. Integration test harness (Testcontainers or the shared local infra,
+     whichever the team prefers — document the choice in developer-setup.md
+     if it changes from what's there now)
+  2. One test per scenario:
+     - S1: console user's token -> GET /me/menus returns the sidebar set for
+       their role (proxy this through a real role with a real permission row)
+     - S2: admin onboards a new user with roles -> Keycloak account + local
+       row + audit row, all in one submit
+     - S3: admin creates and configures a role -> menus selected, API
+       permissions saved, gateway sync triggered
+     - S4: admin changes a user's roles -> full replacement set sent, only
+       changed Keycloak roles touched
+     - S5: admin deactivates a user -> Keycloak disabled, role assignments
+       kept
+     - S6: gateway sync fails after a permission save -> UI-equivalent check
+       (502 returned, DB kept); re-sync succeeds after simulated recovery
+
+ACCEPTANCE CRITERIA:
+  - All 6 scenarios pass against real infrastructure, no mocked Keycloak or
+    gateway-service
+  - Every mutating endpoint exercised writes exactly one admin_audit_log row
+    (asserted per test, not just happy-path)
+
+================================================================================
+SUB-TASK A16: Config Tuning, README & Docs Sync
+================================================================================
+
+DESCRIPTION:
+  Final pass before calling the module done. Per the standing project rule:
+  docs/ must match the code exactly — this task is where any drift
+  introduced across A1-A15 gets corrected, not deferred.
+
+DELIVERABLES:
+  1. application-docker.yml / env-var-driven config for containerized
+     deployment, matching deployment-guide.md
+  2. README.md: overview, prerequisites, build/run, curl examples per
+     endpoint, configuration reference table
+  3. Full re-read of docs/ against the actual merged code:
+     - data-dictionary.md matches the real schema column-for-column
+     - api-reference.md matches every real endpoint, request/response
+       shape and error code
+     - architecture-overview.md's "Open architectural decisions" (§9)
+       updated to reflect what was actually decided during A1-A15, not left
+       as speculative options
+     - flow-diagrams.md matches the real code paths, not the reconstructed
+       first draft
+  4. Verify no stale references remain to the separate `admin_service`
+     database, to UUID api_permissions, or to any other decision this sub-
+     task list superseded
+
+ACCEPTANCE CRITERIA:
+  - `mvn verify` green, Swagger spec covers every endpoint in
+    api-reference.md with no gaps either direction
+  - A reviewer with no prior context can follow docs/ alone and have it
+    match running code exactly
+
+================================================================================
+TASK DEPENDENCY GRAPH
+================================================================================
+
+  A0  (Design Docs — PR Review)
+  └── A1  (Scaffolding)                               [blocked until A0 approved]
+      └── A2  (Flyway V1 — six owned tables)
+          └── A3  (Entities, Repositories, AuditLogWriter)
+              └── A4  (Envelope, Pagination, Exception Handling)
+                  ├── A5  (Health + Swagger)
+                  └── A6  (JWT Re-validation + Current-User Check)
+                      └── A7  (Seed V2 — menus, SUPER_ADMIN, bootstrap perms)
+                          └── A8  (GET /me, GET /me/menus)
+                              └── A9  (Users: List & Create)
+                                  └── A10 (Users: Update/Status/Roles/Reset)
+                                      ├── A11 (Roles CRUD)
+                                      │   ├── A12 (Role -> Menus)
+                                      │   └── A13 (Role -> Permissions + Sync)
+                                      └── A14 (Menus Catalog CRUD)
+                                          └── A15 (Integration Tests S1-S6)
+                                              └── A16 (Config Tuning + Docs Sync)
+
+  NOTE: A5 can run in parallel with A6 (both depend only on A4).
+        A12, A13 and A14 can all run in PARALLEL once A11 is merged — each
+        touches a different table/axis.
+        A15 needs A8-A14 ALL merged (it exercises every scenario).
+        Implementation (A1-A16) begins only after A0 is approved.
+
+================================================================================
+ESTIMATED EFFORT
+================================================================================
+
+  A0:  (design docs — already drafted this session; effort is review time)
+  A1:  3 hours   (scaffolding)
+  A2:  2 hours   (migration — 6 tables, more columns/constraints than a
+                  single-table service like Collector)
+  A3:  4 hours   (6 entities + repos + AuditLogWriter + read-only
+                  ApiPermission mapping)
+  A4:  3 hours   (envelope, pagination, exception handler)
+  A5:  1 hour    (health + swagger)
+  A6:  5 hours   (JWT re-validation is the highest-risk security code in the
+                  service — budget real review time, not just dev time)
+  A7:  2 hours   (seed migration — mostly data entry, verify against
+                  cce-insights-ui's real routes)
+  A8:  3 hours   (menu union/nesting logic is the trickiest part)
+  A9:  5 hours   (first Keycloak integration — provisioning + partial-failure
+                  path)
+  A10: 5 hours   (role diff logic + 4 endpoints)
+  A11: 3 hours   (roles CRUD + guarded delete)
+  A12: 2 hours   (role->menus, including the warning path)
+  A13: 5 hours   (highest-risk endpoint — writes another service's table,
+                  calls another service)
+  A14: 3 hours   (menus CRUD)
+  A15: 6 hours   (6 scenarios against real infra)
+  A16: 3 hours   (docs sync + README)
+
+  TOTAL: ~55 hours (~7.5 working days), plus A0 review time
+
+================================================================================
