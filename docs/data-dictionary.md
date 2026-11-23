@@ -299,3 +299,10 @@ No migration exists yet. Suggested layout per milestone B1 (PRD §10):
 
 `pgcrypto` must be enabled in V1 before any `gen_random_uuid()` default is used — check first whether
 another service sharing `ccedb` has already enabled it.
+
+**Confirmed when actually booted against the real local `ccedb`:** Flyway refuses to run against
+`public` by default, since the schema already has every other service's tables in it and Flyway
+can't tell those apart from an untracked version of its own history. `cce-protocol-service` and
+`cce-matcher-service` already hit this and fixed it the same way — `baseline-on-migrate: true` with
+`baseline-version: 0` (prod profiles flip it back to `false` once their own ledger is real). This
+service's `application.yml` now does the same.
