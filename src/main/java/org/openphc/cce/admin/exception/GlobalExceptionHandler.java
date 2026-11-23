@@ -3,10 +3,12 @@ package org.openphc.cce.admin.exception;
 import org.openphc.cce.admin.dto.ErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** Maps every domain exception 1:1 to the error codes table in docs/api-reference.md. */
 @RestControllerAdvice
@@ -26,6 +28,20 @@ public class GlobalExceptionHandler {
             .orElse("Validation failed");
     return ResponseEntity.status(HttpStatus.BAD_REQUEST)
         .body(new ErrorResponse("VALIDATION_ERROR", message));
+  }
+
+  /** Malformed JSON body — a client error, not a 500. */
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException ex) {
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        .body(new ErrorResponse("VALIDATION_ERROR", "Malformed or unreadable request body"));
+  }
+
+  /** e.g. /roles/not-a-uuid — a client error, not a 500. */
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        .body(new ErrorResponse("VALIDATION_ERROR", "Invalid value for '" + ex.getName() + "'"));
   }
 
   @ExceptionHandler(AccessDeniedException.class)

@@ -239,8 +239,20 @@ always-available presence on every other row.
 { "name": "FACILITY_ADMIN", "displayName": "Facility Administrator", "description": "..." }
 ```
 
-`name` must be `UPPER_SNAKE_CASE` and is **permanent** — there is no rename endpoint. `201` on
-success.
+`name` must be `UPPER_SNAKE_CASE` and is **permanent** — there is no rename endpoint. Precisely:
+uppercase letters and digits, words separated by a **single** underscore, starting with a letter,
+at most 100 characters (`FACILITY_ADMIN`, `L2_SUPPORT` pass; `facility_admin`, `_ADMIN`, `ADMIN_`,
+`FAC__ADMIN`, `1ADMIN` don't). `displayName` is required (max 150); `description` is optional. `201`
+on success, with the created role:
+
+```json
+{ "data": { "id": "...", "name": "FACILITY_ADMIN", "displayName": "Facility Administrator",
+  "description": "...", "isSystem": false, "createdAt": "...", "updatedAt": "..." } }
+```
+
+`GET /roles` returns the same shape as an array, ordered by `name` (not paginated — the set is
+small). A malformed JSON body or a non-UUID `:id` in any path is also `400 VALIDATION_ERROR`, never a
+`500`.
 
 | Status | Cause |
 |---|---|
@@ -251,10 +263,14 @@ success.
 
 Only `displayName` and `description` are accepted; a `name` field in the body, if present, is
 ignored rather than rejected — keep the client from needing special-case handling for an otherwise
-uniform "replace this resource" shape. (Confirm this choice vs. a `400` on an attempted rename before
-implementing — not explicit in the PRD.)
+uniform "replace this resource" shape. **Decided (Milestone 3):** ignore, not `400`. `displayName` is
+required; a blank `description` is stored as `null`. A system role (`is_system`) cannot be modified at
+all → `409 SYSTEM_ROLE_IMMUTABLE`.
 
 ### `DELETE /admin/v1/roles/:id`
+
+`204` with no body on success; the role's `role_menus` rows are removed with it. Audits `ROLE_DELETED`.
+The system-role check runs first, then the in-use check.
 
 | Status | Cause |
 |---|---|
@@ -270,8 +286,12 @@ implementing — not explicit in the PRD.)
 { "menuIds": ["...", "..."] }
 ```
 
-Full-replacement semantics — the payload is always the complete desired set. Audits
-`ROLE_MENUS_UPDATED`.
+Full-replacement semantics — the payload is always the complete desired set; an empty list clears the
+role's menus. Duplicate ids in the payload are collapsed. Saving the same set twice succeeds and
+still writes an audit row. If **any** id is not a known menu, the whole request is rejected with
+`404 MENU_NOT_FOUND` and the existing set is left untouched. Allowed on system roles too (editing
+`SUPER_ADMIN`'s menus cannot lock anyone out of this console, whose own sidebar is static). Audits
+`ROLE_MENUS_UPDATED` (before/after menu ids).
 
 ```json
 { "data": { "menuIds": [...] } }
@@ -316,7 +336,11 @@ action `cce-admin-ui` shows after a `KEYCLOAK_SYNC_FAILED` (F-14, scenario S6). 
 | `DELETE` | `/:id` | Delete |
 
 `GET` returns the complete catalog (not filtered by caller's roles — that's `GET /me/menus`), ordered
-by `sort_order`. Flat list — no nesting.
+by `sort_order` then `label`, **including inactive menus**. Flat list — no nesting. Each entry:
+`{ id, menuKey, label, path, icon, sortOrder, isActive }`.
+
+> **Milestone note:** only `GET` exists so far (Milestone 3 — the Role Detail → Menus tab needs the
+> catalog). `POST` / `PUT` / `DELETE` below arrive with Milestone 7.
 
 `POST` / `PUT`:
 ```json

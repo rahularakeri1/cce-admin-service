@@ -311,3 +311,17 @@ they came up during this review:
   above; deliberately **not** added to this release's scope.
 - **Facility-scoped enforcement.** `users.facility_scope` is stored and displayed only; nothing
   enforces it yet.
+
+### 9.6 Authorization is enforced at the gateway, not in this service
+
+Every `/admin/v1/**` endpoint in this service requires a valid JWT and a local `ACTIVE` user — nothing
+more. *Which role may call which endpoint* is enforced by `gateway-service` against `api_permissions`
+(the `SUPER_ADMIN` rows seeded by `V2__seed.sql`), by design (§3). Consequences to know about:
+
+- Locally, `cce-admin-ui`'s Vite proxy talks to this service directly (`localhost:8085`), bypassing
+  the gateway, so **any `ACTIVE` local user can currently create/delete roles** in that setup.
+- Behind the gateway in a real environment, a caller without the `SUPER_ADMIN` realm role is stopped
+  before reaching this service.
+- A service-level `SUPER_ADMIN` check would be defence in depth, but it is not specified by the PRD
+  and would make this service a second source of truth for permissions. Revisit in Milestone 8
+  (End-to-End), which runs the whole chain through the real gateway.
