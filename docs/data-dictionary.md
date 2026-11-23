@@ -75,8 +75,9 @@ Keycloak account rather than recreating anything (B-34).
 ### 1.2 `roles` — Named Access Bundles
 
 A named grouping of access, e.g. `FACILITY_ADMIN`. `UPPER_SNAKE_CASE` by convention, enforced
-client-side (F-12) and should be enforced server-side too since `name` doubles as the Keycloak realm
-role name and `api_permissions.permission_name` (architecture-overview.md §3).
+client-side (F-12) **and server-side** (`^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$`, max 100 — single underscores
+between words, starts with a letter) since `name` doubles as the Keycloak realm role name and
+`api_permissions.permission_name` (architecture-overview.md §3).
 
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
