@@ -9,8 +9,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 
 /**
  * Every /admin/v1/** path is authenticated except /health and the Swagger/OpenAPI paths (B-05,
@@ -44,7 +44,9 @@ public class SecurityConfig {
                     .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtRoleConverter))
                     .authenticationEntryPoint(authenticationEntryPoint))
         .exceptionHandling(handling -> handling.accessDeniedHandler(accessDeniedHandler))
-        .addFilterAfter(currentUserAuthenticationFilter, BearerTokenAuthenticationFilter.class);
+        // Must sit AFTER ExceptionTranslationFilter (which precedes AuthorizationFilter) so the
+        // AccessDeniedException this filter throws becomes a JSON 403, not an unhandled 500.
+        .addFilterBefore(currentUserAuthenticationFilter, AuthorizationFilter.class);
 
     return http.build();
   }

@@ -85,6 +85,20 @@ Suggested build order (PRD milestone notes):
 5. Wrap `keycloak-admin-client` behind a `KeycloakGateway` interface in `client/` so service tests
    can mock it without a running Keycloak.
 
+### First admin (once per environment)
+
+After the service has started once (so Flyway has applied `V2__seed.sql`), create a user in the `cce`
+realm in Keycloak, then:
+
+```bash
+scripts/bootstrap-admin.sh testadmin@example.com
+```
+
+It creates the realm role `SUPER_ADMIN` if missing, assigns it to that Keycloak user, and inserts the
+matching local `users` / `user_roles` rows. Safe to re-run. Env overrides: `KC_URL`, `KC_REALM`,
+`KC_ADMIN`, `KC_ADMIN_PASSWORD`, `PSQL` (see the script header). Without the local row, every
+`/admin/v1/**` call returns `403` even though the Keycloak login succeeds.
+
 ## 3. Frontend — `cce-admin-ui`
 
 ```bash
