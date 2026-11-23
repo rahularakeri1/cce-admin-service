@@ -287,8 +287,16 @@ Two bootstrap problems are listed as risks in the PRD (§12) without an owner:
   integration. This should be seeded alongside the `SUPER_ADMIN` bootstrap, not left to be discovered
   per environment.
 
-Decide the seeding mechanism (migration-seeded vs. per-environment script, matching the pattern
-`cce-insights-service`'s `onboard-insights-user.sh` already uses) before milestone M0.
+**Resolved (Milestone 2):** both are handled by a split, matching `cce-insights-service`'s
+`onboard-insights-user.sh` pattern.
+
+- **Migration-seeded (`V2__seed.sql`)** — the `SUPER_ADMIN` role, the 7 menus, the `role_menus` links,
+  and the `api_permissions` rows (including the exact `GET /admin/v1/me` and `GET /admin/v1/me/menus`
+  rows). Reference data, identical in every environment, no personal data.
+- **Per-environment script (`scripts/bootstrap-admin.sh [email]`)** — the first `SUPER_ADMIN`
+  *account*: creates the Keycloak realm role if gateway hasn't yet synced it, assigns it to an
+  existing Keycloak user, and inserts the local `users` + `user_roles` rows. Idempotent. A named
+  admin never lives in a migration.
 
 ### 9.5 Deferred for a future release
 

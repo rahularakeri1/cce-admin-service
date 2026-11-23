@@ -40,6 +40,8 @@ class AdminServiceIntegrationTest {
   @AfterEach
   void cleanup() {
     if (savedUser != null) {
+      // admin_audit_log.actor_id is a RESTRICT foreign key into users, so the audit rows go first.
+      auditLogRepository.deleteAllByActorId(savedUser.getId());
       userRepository.deleteById(savedUser.getId());
     }
   }
@@ -77,11 +79,7 @@ class AdminServiceIntegrationTest {
 
   @Test
   void auditLogWriterWritesExactlyOneRow() {
-    // Deliberately NOT assigned to `savedUser` / cleaned up: admin_audit_log.actor_id has a
-    // RESTRICT foreign key into users — once an audit row references this user, deleting the
-    // user is correctly refused by the database (no hard delete, audit continuity by design, see
-    // docs/data-dictionary.md §1.1). This test leaves the row behind on purpose, same as
-    // production would.
+    // Cleaned up in @AfterEach: production never deletes audit rows, but a test must not leave any.
     User user = new User();
     user.setId(UUID.randomUUID());
     user.setUsername("audit-test-user");
@@ -90,6 +88,7 @@ class AdminServiceIntegrationTest {
     user.setLastName("Test");
     user.setStatus(UserStatus.ACTIVE);
     User persisted = userRepository.save(user);
+    savedUser = persisted;
 
     auditLogWriter.write(
         persisted.getId(),

@@ -1,5 +1,6 @@
 package org.openphc.cce.admin.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.openphc.cce.admin.entity.RoleMenu;
@@ -9,6 +10,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface RoleMenuRepository extends JpaRepository<RoleMenu, RoleMenuId> {
 
   List<RoleMenu> findAllByRoleId(UUID roleId);
+
+  List<RoleMenu> findAllByRoleIdIn(Collection<UUID> roleIds);
 
   void deleteAllByRoleId(UUID roleId);
 

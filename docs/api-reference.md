@@ -58,17 +58,18 @@ Caller's own profile, resolved from the JWT.
 { "data": { "id": "...", "username": "...", "roles": ["FACILITY_ADMIN"], "facilityScope": "..." } }
 ```
 
-No pagination. `roles` is role **names**, not full role objects.
+No pagination. `roles` is role **names**, not full role objects, taken from the user's local `user_roles` assignment — not from the raw JWT, whose realm roles also include Keycloak-internal ones (`default-roles-cce`, `offline_access`, `uma_authorization`). A valid token whose email has no local `ACTIVE` user is rejected with `403` before this endpoint runs.
 
 **Side effect: updates `last_login_at`.** Since every console calls this once per session (header
 load, right after login), it's reused as the trigger point for tracking logins rather than adding a
 new endpoint or a Keycloak webhook. Sets `last_login_at` to the JWT's **`auth_time`** claim — the
 actual login moment, which stays constant across token refreshes (unlike `iat`, which changes every
-refresh) — guarded by `WHERE last_login_at IS NULL OR last_login_at < now() - interval '5 minutes'`
-so repeated calls within one session don't write on every single one. See
+refresh) — but only when it is **newer than the stored value**, so repeated calls within one session
+don't write at all, and a quick re-login still registers. If `auth_time` is absent, it falls back to
+`now()`, throttled to one write per 5 minutes. See
 [data-dictionary.md §1.1](data-dictionary.md#11-users--console-accounts).
 
-**Open item: `auth_time` presence isn't guaranteed by default.** Same caveat category as `email` —
+**`auth_time` presence isn't guaranteed by default — confirmed present for `cce-admin-ui`.** (Verified Milestone 2 against local Keycloak 26.5.4: a PKCE login through the `cce-admin-ui` client yields a token with `email`, `preferred_username` and `auth_time`. Still unchecked for `cce-insights-ui`'s client. Note `admin-cli` direct-grant tokens are lightweight and carry none of these, so they can't be used to test this API.) Same caveat category as `email` —
 Keycloak only includes `auth_time` in a token if the client requests it (via `max_age` on the auth
 request, or a client scope/mapper configured to always include it). Confirm `cce-admin-ui`'s and
 `cce-insights-ui`'s Keycloak client configuration actually includes it before relying on this;
