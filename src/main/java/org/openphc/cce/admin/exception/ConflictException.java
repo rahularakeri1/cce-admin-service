@@ -24,6 +24,20 @@ public class ConflictException extends ApiException {
     return new ConflictException("ROLE_IN_USE", "Role is still assigned to users: " + name);
   }
 
+  public static ConflictException roleNameReserved(String name) {
+    return new ConflictException(
+        "ROLE_NAME_RESERVED",
+        "Name belongs to an existing gateway permission set and cannot be used for a new role: " + name);
+  }
+
+  public static ConflictException roleNeedsPermissions(String name) {
+    return new ConflictException(
+        "ROLE_IN_USE",
+        "Users still hold role "
+            + name
+            + "; removing all its permissions would delete it from Keycloak. Reassign them first.");
+  }
+
   public static ConflictException systemRoleImmutable(String name) {
     return new ConflictException("SYSTEM_ROLE_IMMUTABLE", "System role cannot be modified or deleted: " + name);
   }

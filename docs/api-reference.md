@@ -299,10 +299,17 @@ still writes an audit row. If **any** id is not a known menu, the whole request 
 
 ### `GET /admin/v1/roles/:id/permissions`, `PUT /admin/v1/roles/:id/permissions`
 
-`PUT` replaces the full `api_permissions` row set for this role in **one transaction**, then
-automatically calls `gateway-service`'s `POST /api/permissions/sync-to-keycloak` (B-42, B-43). If the
-sync call fails, the DB change is **kept** and the response is `502 KEYCLOAK_SYNC_FAILED` — see
-[flow-diagrams.md](flow-diagrams.md#flow-4--permission-replacement--sync).
+`GET` returns the role's rows from `api_permissions` (`permission_name` = role name), ordered by pattern
+then method:
+
+```json
+{ "data": { "permissions": [
+  { "id": 43, "httpMethod": "GET", "uriPattern": "/v1/insights/compliance/**",
+    "description": "Read compliance insights", "category": "COMPLIANCE" }
+] } }
+```
+
+`PUT` replaces the **complete** set (the body is never a diff) and then syncs:
 
 ```json
 { "permissions": [
@@ -310,17 +317,43 @@ sync call fails, the DB change is **kept** and the response is `502 KEYCLOAK_SYN
 ] }
 ```
 
-Audits `ROLE_PERMISSIONS_UPDATED` on success; the DB write is still audited even when the subsequent
-sync fails, since the local state did change. Note: `gateway-service`'s own permission enforcement
-is already refreshed the moment this call is made, regardless of whether the Keycloak half succeeds —
-see [flow-diagrams.md Flow 4](flow-diagrams.md#flow-4--permission-replacement--sync) for why a role
-still can't be assigned to a user until a sync actually succeeds, despite that.
+1. In **one transaction**: rows are diffed on `(httpMethod, uriPattern)` — kept rows keep their `id` and
+   get the new description/category, removed rows are deleted, new rows inserted — and
+   `ROLE_PERMISSIONS_UPDATED` is audited. This commits.
+2. **Then** gateway's sync is called (never inside that transaction, so it cannot roll it back).
+
+`200` with `{ "permissions": [...], "syncStatus": "SYNCED" }` when both succeed. If the sync fails:
+`502 KEYCLOAK_SYNC_FAILED`, the rows **and** the audit row stay saved — see
+[flow-diagrams.md](flow-diagrams.md#flow-4--permission-replacement--sync).
+
+| Status | Cause |
+|---|---|
+| `400` | `VALIDATION_ERROR` — `httpMethod` not one of `GET POST PUT PATCH DELETE` (upper case); `uriPattern` blank, not starting with `/`, containing spaces or longer than 512; `category` longer than 255; the same `(method, pattern)` twice in one request |
+| `404` | `ROLE_NOT_FOUND` |
+| `409` | `SYSTEM_ROLE_IMMUTABLE` — `SUPER_ADMIN`'s permissions cannot be edited (removing `/admin/v1/**` would lock every admin out) |
+| `409` | `ROLE_IN_USE` — an **empty** set while users still hold the role: gateway's sync deletes any Keycloak role with no rows, which would pull it from under them. An empty set is allowed once nobody holds the role |
+| `502` | `KEYCLOAK_SYNC_FAILED` — rows saved, sync did not succeed |
+
+**What counts as a failed sync.** gateway-service's `POST /api/permissions/sync-to-keycloak` is **global**
+(no per-role variant): it reloads *every* `api_permissions` row into gateway and pushes *every* distinct
+`permission_name` to Keycloak as a realm role, **deleting** realm roles that have no rows (except
+`default-roles-*`, `offline_access`, `uma_authorization`). This service treats its answer as follows:
+
+| gateway answers | Result for this role |
+|---|---|
+| `200` | success |
+| `206` (partial) | success **unless this role is in `failedRoles`** — another role's failure doesn't block this one |
+| `206` naming this role, `500`, any other status, connection error, timeout (20s default), unreadable body | `502 KEYCLOAK_SYNC_FAILED` |
 
 ### `POST /admin/v1/roles/:id/sync`
 
-No body. Re-runs the gateway sync for this role without changing any row — the manual "Re-sync"
-action `cce-admin-ui` shows after a `KEYCLOAK_SYNC_FAILED` (F-14, scenario S6). `200` on success,
-`502 KEYCLOAK_SYNC_FAILED` if it fails again.
+No body. Re-runs the (global) gateway sync, judged for this role as above, without changing any row — the manual "Re-sync"
+action `cce-admin-ui` shows after a `KEYCLOAK_SYNC_FAILED` (F-14, scenario S6). `200` on success with the same `{ permissions, syncStatus: "SYNCED" }` shape as `PUT`,
+`502 KEYCLOAK_SYNC_FAILED` if it fails again. Changes no data, so it writes no audit row.
+
+**There is no stored sync status.** gateway cannot report whether a role exists in Keycloak, so the
+API does not expose one: `syncStatus` appears only on a response that follows a successful sync, and
+`cce-admin-ui` shows "status unknown" until the first Save or Re-sync in a session.
 
 ---
 

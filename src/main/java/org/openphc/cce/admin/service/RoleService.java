@@ -19,6 +19,7 @@ import org.openphc.cce.admin.entity.Role;
 import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.exception.ConflictException;
 import org.openphc.cce.admin.exception.NotFoundException;
+import org.openphc.cce.admin.repository.ApiPermissionRepository;
 import org.openphc.cce.admin.repository.MenuRepository;
 import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
@@ -41,6 +42,7 @@ public class RoleService {
   private final UserRoleRepository userRoleRepository;
   private final RoleMenuRepository roleMenuRepository;
   private final MenuRepository menuRepository;
+  private final ApiPermissionRepository permissionRepository;
   private final AuditLogWriter auditLogWriter;
 
   public RoleService(
@@ -48,11 +50,13 @@ public class RoleService {
       UserRoleRepository userRoleRepository,
       RoleMenuRepository roleMenuRepository,
       MenuRepository menuRepository,
+      ApiPermissionRepository permissionRepository,
       AuditLogWriter auditLogWriter) {
     this.roleRepository = roleRepository;
     this.userRoleRepository = userRoleRepository;
     this.roleMenuRepository = roleMenuRepository;
     this.menuRepository = menuRepository;
+    this.permissionRepository = permissionRepository;
     this.auditLogWriter = auditLogWriter;
   }
 
@@ -70,6 +74,11 @@ public class RoleService {
   public RoleResponse create(CreateRoleRequest request, UUID actorId, String ip) {
     if (roleRepository.existsByName(request.name())) {
       throw ConflictException.duplicateRoleName(request.name());
+    }
+    // A role's name is also its api_permissions.permission_name. If gateway already owns rows under
+    // that name, a new role would silently adopt them — and deleting it would wipe gateway's rules.
+    if (permissionRepository.existsByPermissionName(request.name())) {
+      throw ConflictException.roleNameReserved(request.name());
     }
     Role role = new Role();
     role.setId(UUID.randomUUID());
@@ -104,9 +113,16 @@ public class RoleService {
     return after;
   }
 
-  /** Both guards are service-layer checks so the client gets a precise code, not an FK error. */
+  /**
+   * Both guards are service-layer checks so the client gets a precise code, not an FK error. Also
+   * removes the role's api_permissions rows (same transaction) so no orphaned rules keep granting
+   * access under a name that no longer exists.
+   *
+   * @return true if permission rows were removed — the caller then runs a gateway sync so Keycloak
+   *     drops the realm role too
+   */
   @Transactional
-  public void delete(UUID id, UUID actorId, String ip) {
+  public boolean delete(UUID id, UUID actorId, String ip) {
     Role role = find(id);
     if (role.isSystem()) {
       throw ConflictException.systemRoleImmutable(role.getName());
@@ -115,9 +131,14 @@ public class RoleService {
       throw ConflictException.roleInUse(role.getName());
     }
     RoleResponse before = RoleResponse.from(role);
+    boolean hadPermissionRows = permissionRepository.existsByPermissionName(role.getName());
+    if (hadPermissionRows) {
+      permissionRepository.deleteAllByPermissionName(role.getName());
+    }
     roleRepository.delete(role); // role_menus rows go with it (ON DELETE CASCADE)
     roleRepository.flush();
     auditLogWriter.write(actorId, AuditAction.ROLE_DELETED, ENTITY_TYPE, id.toString(), before, null, ip);
+    return hadPermissionRows;
   }
 
   @Transactional(readOnly = true)

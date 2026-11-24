@@ -19,6 +19,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.admin.client.GatewaySyncClient;
 import org.openphc.cce.admin.entity.Menu;
 import org.openphc.cce.admin.entity.Role;
 import org.openphc.cce.admin.entity.User;
@@ -33,6 +34,7 @@ import org.openphc.cce.admin.repository.UserRoleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
@@ -52,6 +54,7 @@ class RoleEndpointIntegrationTest {
   @Autowired private UserRepository userRepository;
   @Autowired private UserRoleRepository userRoleRepository;
   @Autowired private AdminAuditLogRepository auditLogRepository;
+  @MockBean private GatewaySyncClient gateway; // never talk to a real gateway from these tests
 
   private User actor;
   private final List<UUID> createdRoleIds = new ArrayList<>();

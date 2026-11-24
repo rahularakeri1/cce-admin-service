@@ -128,6 +128,22 @@ Suggested build order:
 4. Diff against the **last-fetched state only** to enable/disable Save on forms — the payload sent
    is always the complete replacement set, never a partial diff (F-11, F-13, F-14).
 
+### Running the gateway locally (needed for Permissions → sync)
+
+`gateway-service` is not in the compose stack, and its defaults point at another database and Keycloak.
+Build it once (`cd ../gateway-service && ./gradlew bootJar`), then:
+
+```bash
+scripts/run-gateway-local.sh      # foreground, :8090, against local ccedb + Keycloak realm `cce`
+```
+
+`GATEWAY_URL` (default `http://localhost:8090`) tells this service where to find it. The **first sync
+creates every distinct `api_permissions.permission_name` as a realm role** in the local realm
+(`COMPLIANCE_READ`, `INSIGHTS_READ`, …) and deletes realm roles that have no rows — expected, but
+don't hand-create roles in Keycloak that have no `api_permissions` rows, or the next sync removes them.
+Without a running gateway, saving permissions still stores the rows and answers `502
+KEYCLOAK_SYNC_FAILED`; start the gateway and use **Re-sync**.
+
 ## 4. Running the full loop locally
 
 No optimistic UI anywhere (PRD §2 Out of scope, F-06) — every mutation waits for the server, and

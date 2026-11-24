@@ -11,6 +11,7 @@ import org.openphc.cce.admin.dto.RoleMenusResponse;
 import org.openphc.cce.admin.dto.RoleResponse;
 import org.openphc.cce.admin.dto.UpdateRoleRequest;
 import org.openphc.cce.admin.security.CurrentUserProvider;
+import org.openphc.cce.admin.service.GatewaySyncService;
 import org.openphc.cce.admin.service.RoleService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,10 +30,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class RoleController {
 
   private final RoleService roleService;
+  private final GatewaySyncService syncService;
   private final CurrentUserProvider currentUser;
 
-  public RoleController(RoleService roleService, CurrentUserProvider currentUser) {
+  public RoleController(RoleService roleService, GatewaySyncService syncService, CurrentUserProvider currentUser) {
     this.roleService = roleService;
+    this.syncService = syncService;
     this.currentUser = currentUser;
   }
 
@@ -61,7 +64,11 @@ public class RoleController {
   @DeleteMapping("/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void delete(@PathVariable UUID id, HttpServletRequest request) {
-    roleService.delete(id, currentUser.get().id(), request.getRemoteAddr());
+    boolean permissionRowsRemoved = roleService.delete(id, currentUser.get().id(), request.getRemoteAddr());
+    if (permissionRowsRemoved) {
+      // Runs after the delete has committed; failure is logged only — any later sync reconciles.
+      syncService.trySync();
+    }
   }
 
   @GetMapping("/{id}/menus")
