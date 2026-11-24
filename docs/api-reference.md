@@ -117,7 +117,7 @@ console — see the bootstrap note in
 
 ### `GET /admin/v1/users`
 
-Query params (all optional, combined with AND): `status` (`ACTIVE`/`INACTIVE`/`LOCKED`, any case),
+Query params (all optional, combined with AND): `status` (`ACTIVE` or `INACTIVE`, any case — `LOCKED` was dropped, see data-dictionary.md §2.1),
 `roleId`, `facilityScope` (exact, case-insensitive), `q` (case-insensitive substring of username, email,
 first or last name; `%` and `_` are literal), `page` (0-based, default 0), `pageSize` (1–100, default 20)
 (B-30). A bad `status`, `roleId`, `page` or `pageSize` is `400 VALIDATION_ERROR`.
