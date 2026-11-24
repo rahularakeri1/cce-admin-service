@@ -29,6 +29,16 @@ whenever standing up a new environment, and see
 [architecture-overview.md §9.2](architecture-overview.md#92-role-claim-path--confirm-before-keycloak-provisioning)
 for why `JWT_ROLES_CLAIM_PATH` specifically needs a live check, not just copying the default.
 
+## Gateway sync
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GATEWAY_URL` | `http://localhost:8090` | Base URL of `gateway-service`; the sync calls `POST {GATEWAY_URL}/api/permissions/sync-to-keycloak` |
+| `GATEWAY_SYNC_TIMEOUT_SECONDS` | `20` | Total time allowed for the call; a timeout is a `502 KEYCLOAK_SYNC_FAILED` |
+
+gateway's `/api/permissions/**` endpoints require **no token** (architecture-overview.md §9.7), so this
+service sends none; keep them unreachable from outside the cluster.
+
 ## CI
 
 Jenkins CI (per PRD §6). Definition of done per PRD §11 — required before merge, not just before

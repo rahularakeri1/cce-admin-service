@@ -53,6 +53,12 @@ A person who can sign in to a CCE console. Mirrored 1:1 with a Keycloak user; jo
 | `created_at` | `TIMESTAMPTZ` | No | `now()` | — |
 | `updated_at` | `TIMESTAMPTZ` | No | `now()` | — |
 
+**Ownership of rows.** Rows whose `permission_name` equals a role in `roles` are managed by this service
+(Permissions tab). Other `permission_name`s (e.g. `COMPLIANCE_READ`, `INSIGHTS_READ`, the `HTTPBIN_*`
+ones) are gateway's own and have no local role: this service refuses to create a role with such a name
+(`409 ROLE_NAME_RESERVED`) and never deletes them. No unique constraint exists on `(permission_name,
+http_method, uri_pattern)`, so this service de-duplicates in code.
+
 **Constraints:**
 - `PK`: `id`
 - `UNIQUE`: `email` — violated → `409 EMAIL_IN_USE` (B-31). Also now the sole JWT-resolution join key
@@ -188,13 +194,13 @@ reads/writes rows into it, same as `gateway-service` does.**
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
 | `id` | `BIGSERIAL` | No | — | Matches `gateway-service`'s existing `Long id` — the one odd one out among the seven tables, kept intentionally rather than migrated to UUID (architecture-overview.md §9.1) |
-| `permission_name` | `VARCHAR(100)` | No | — | `= roles.name` (architecture-overview.md §3) |
+| `permission_name` | `VARCHAR(255)` | No | — | `= roles.name` (architecture-overview.md §3). Also the Keycloak realm role gateway's sync creates |
 | `http_method` | `VARCHAR(10)` | No | — | `GET` \| `POST` \| `PUT` \| `PATCH` \| `DELETE` |
-| `uri_pattern` | `VARCHAR(255)` | No | — | Ant-style path pattern gateway-service matches against |
+| `uri_pattern` | `VARCHAR(512)` | No | — | Ant-style path pattern gateway-service matches against. This service requires it to start with `/` and contain no spaces |
 | `description` | `TEXT` | Yes | — | — |
-| `resource_category` | `VARCHAR(50)` | Yes | — | Shown as "category" in the Permissions tab (F-14) |
-| `created_at` | `TIMESTAMPTZ` | No | `CURRENT_TIMESTAMP` | — |
-| `updated_at` | `TIMESTAMPTZ` | No | `CURRENT_TIMESTAMP` | Auto-updated by trigger in gateway-service's existing migration — replicate the trigger here if this service becomes a co-writer |
+| `resource_category` | `VARCHAR(255)` | Yes | — | Shown as "category" in the Permissions tab (F-14) |
+| `created_at` | `TIMESTAMP` (no time zone) | No | `now()` | Set by Hibernate (`@CreationTimestamp`) on rows this service inserts — an explicit NULL would otherwise bypass the column default |
+| `updated_at` | `TIMESTAMP` (no time zone) | No | `now()` | Set by Hibernate (`@UpdateTimestamp`) for this service's writes. Auto-updated by trigger in gateway-service's existing migration — replicate the trigger here if this service becomes a co-writer |
 
 **Constraints:**
 - `PK`: `id`

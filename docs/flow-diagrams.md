@@ -128,6 +128,13 @@ failed, creates it), and Keycloak will reject assigning a role it doesn't know a
 
 ---
 
+**Sync is global, and it deletes.** gateway's sync has no per-role form: any role's Save or Re-sync
+reloads every `api_permissions` row and reconciles *every* Keycloak realm role against them, deleting
+roles with no rows. That is why emptying the permissions of a role users still hold is refused
+(`409 ROLE_IN_USE`), why `SUPER_ADMIN`'s rows are protected, and why deleting a role removes its rows
+(then syncs) so no orphan lingers. A `206` is judged per role: only a failure naming *this* role fails
+this request.
+
 ## Flow 5 — Manual re-sync (scenario S6)
 
 ```mermaid

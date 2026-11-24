@@ -325,3 +325,18 @@ more. *Which role may call which endpoint* is enforced by `gateway-service` agai
 - A service-level `SUPER_ADMIN` check would be defence in depth, but it is not specified by the PRD
   and would make this service a second source of truth for permissions. Revisit in Milestone 8
   (End-to-End), which runs the whole chain through the real gateway.
+
+### 9.7 gateway-service's sync endpoint is unauthenticated — verified, not assumed
+
+`JwtValidationFilter` is attached only to the proxied `/admin/**` route in gateway's configuration;
+`/api/permissions/**` is a controller on the gateway application itself and is **not** behind it.
+Verified against a running gateway (Milestone 4): `POST /api/permissions/sync-to-keycloak` and
+`GET /api/permissions/keycloak/test-connection` answer `200` with no `Authorization` header.
+
+- **Consequence for this service:** `GatewaySyncClient` sends no token and no extra gateway
+  permission rows are needed (an earlier plan to forward the caller's JWT and seed one was dropped).
+- **Consequence for operations:** anything that can reach gateway's port can trigger a global
+  Keycloak reconcile, including deleting realm roles. Keep `/api/permissions/**` off any public
+  ingress (network policy or ingress rules) — that is the only protection today.
+- Not changed here: `gateway-service` belongs to another team. Raise it with them.
+
