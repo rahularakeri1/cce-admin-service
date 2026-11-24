@@ -1,0 +1,56 @@
+package org.openphc.cce.admin.controller;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import java.util.List;
+import java.util.UUID;
+import org.openphc.cce.admin.dto.ApiResponse;
+import org.openphc.cce.admin.dto.CreateUserRequest;
+import org.openphc.cce.admin.dto.UserResponse;
+import org.openphc.cce.admin.security.CurrentUserProvider;
+import org.openphc.cce.admin.service.UserCreationService;
+import org.openphc.cce.admin.service.UserQueryService;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+/** Users — list and create (Milestone 5). Edit, status, roles and reset-password follow in Milestone 6. */
+@RestController
+@RequestMapping("/admin/v1/users")
+public class UserController {
+
+  private final UserCreationService creationService;
+  private final UserQueryService queryService;
+  private final CurrentUserProvider currentUser;
+
+  public UserController(UserCreationService creationService, UserQueryService queryService, CurrentUserProvider currentUser) {
+    this.creationService = creationService;
+    this.queryService = queryService;
+    this.currentUser = currentUser;
+  }
+
+  @GetMapping
+  public ApiResponse<List<UserResponse>> list(
+      @RequestParam(required = false) String status,
+      @RequestParam(required = false) UUID roleId,
+      @RequestParam(required = false) String facilityScope,
+      @RequestParam(required = false) String q,
+      @RequestParam(required = false) Integer page,
+      @RequestParam(required = false) Integer pageSize) {
+    UserQueryService.Result result = queryService.list(status, roleId, facilityScope, q, page, pageSize);
+    return ApiResponse.of(result.users(), result.pagination());
+  }
+
+  @PostMapping
+  @ResponseStatus(HttpStatus.CREATED)
+  public ApiResponse<UserResponse> create(@Valid @RequestBody CreateUserRequest body, HttpServletRequest request) {
+    UserCreationService.Created created = creationService.create(body, currentUser.get().id(), request.getRemoteAddr());
+    ApiResponse<UserResponse> response = ApiResponse.of(created.user());
+    return created.warnings().isEmpty() ? response : response.withWarnings(created.warnings());
+  }
+}

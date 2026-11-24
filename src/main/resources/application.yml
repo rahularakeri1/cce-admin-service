@@ -37,10 +37,19 @@ jwt:
 keycloak:
   server-url: ${KEYCLOAK_SERVER_URL:http://localhost:8081}
   realm: ${KEYCLOAK_TARGET_REALM:cce}
+  # Admin API credentials. If admin-client-secret is set -> client_credentials grant for a
+  # service-account client in `realm` (use this in real environments). Otherwise -> password grant
+  # as admin-username in `admin-realm` (local dev: the Keycloak master admin).
+  admin-realm: ${KEYCLOAK_ADMIN_REALM:master}
   admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:admin-cli}
   admin-client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:}
   admin-username: ${KEYCLOAK_ADMIN_USERNAME:admin}
   admin-password: ${KEYCLOAK_ADMIN_PASSWORD:admin}
+  # Invitation email (VERIFY_EMAIL + UPDATE_PASSWORD): link lifetime, and where the user lands after
+  # completing it. The redirect must be a valid redirect URI of invite-client-id in Keycloak.
+  invite-lifespan-seconds: ${KEYCLOAK_INVITE_LIFESPAN_SECONDS:259200}
+  invite-client-id: ${KEYCLOAK_INVITE_CLIENT_ID:cce-admin-ui}
+  invite-redirect-uri: ${KEYCLOAK_INVITE_REDIRECT_URI:http://localhost:3002/}
 
 gateway:
   # gateway-service's sync endpoint — see client/GatewaySyncClient. Local: scripts/run-gateway-local.sh

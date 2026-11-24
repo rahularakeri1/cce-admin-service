@@ -24,6 +24,18 @@ public class ConflictException extends ApiException {
     return new ConflictException("ROLE_IN_USE", "Role is still assigned to users: " + name);
   }
 
+  public static ConflictException usernameInUse(String username) {
+    return new ConflictException("USERNAME_IN_USE", "Username already in use: " + username);
+  }
+
+  public static ConflictException roleNotSynced(java.util.List<String> roleNames) {
+    return new ConflictException(
+        "ROLE_NOT_SYNCED",
+        "Role(s) not in Keycloak yet: "
+            + String.join(", ", roleNames)
+            + " — open the role's Permissions tab and Save or Re-sync first");
+  }
+
   public static ConflictException roleNameReserved(String name) {
     return new ConflictException(
         "ROLE_NAME_RESERVED",

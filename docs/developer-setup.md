@@ -128,6 +128,20 @@ Suggested build order:
 4. Diff against the **last-fetched state only** to enable/disable Save on forms — the payload sent
    is always the complete replacement set, never a partial diff (F-11, F-13, F-14).
 
+### Local email for user invitations (needed to see the invitation link)
+
+Creating a user makes **Keycloak** email them a verify-and-set-password link, and your local realm has no
+SMTP. Without it every creation succeeds but warns "Invitation email could not be sent".
+
+```bash
+scripts/setup-local-mail.sh       # starts Mailpit on the compose network, points realm `cce` SMTP at it
+```
+
+Then open **http://localhost:8025**: every email Keycloak sends shows up there with its link. Clicking
+it walks through verify-email → set-password, after which the user can log in. Dev only — never run
+against a shared realm. Keycloak admin credentials for the service itself: `KEYCLOAK_ADMIN_*` in
+`application.yml` (defaults work locally; architecture-overview.md §9.8).
+
 ### Running the gateway locally (needed for Permissions → sync)
 
 `gateway-service` is not in the compose stack, and its defaults point at another database and Keycloak.

@@ -117,8 +117,14 @@ console — see the bootstrap note in
 
 ### `GET /admin/v1/users`
 
-Query params: `status`, `roleId`, `facilityScope`, `q` (matches name or email), `page`, `pageSize`
-(B-30).
+Query params (all optional, combined with AND): `status` (`ACTIVE`/`INACTIVE`/`LOCKED`, any case),
+`roleId`, `facilityScope` (exact, case-insensitive), `q` (case-insensitive substring of username, email,
+first or last name; `%` and `_` are literal), `page` (0-based, default 0), `pageSize` (1–100, default 20)
+(B-30). A bad `status`, `roleId`, `page` or `pageSize` is `400 VALIDATION_ERROR`.
+
+Newest first. Each item has the same shape as the `POST` response (including `roles` as role names and
+`lastLoginAt`, which is `null` until the first login — an `ACTIVE` user with `null` is the "needs
+attention" case in the UI). The envelope carries `pagination: { page, pageSize, total }`.
 
 ### `POST /admin/v1/users`
 
@@ -134,44 +140,71 @@ accepted residual risk of this ordering and why the email still comes last.
   "facilityScope": "...", "roleIds": ["..."] }
 ```
 
-`201` with the created user (same shape as `GET /me`, plus `status`). No separate "send invite" step
-is exposed — creation handles it automatically.
+`username` 3–100 chars of letters, digits and `. _ @ + -`; `email` a valid address; both are
+**lower-cased by the server** before anything else (Keycloak does the same, and the token's `email`
+claim is matched against the stored value). `facilityScope` is optional free text. `roleIds` may be
+empty — a user with no roles is allowed; duplicates in it are collapsed.
 
-**Invitation email.** One action-token email, link valid for 72 hours (matching this platform's
-existing `onboard-insights-user.sh` precedent), covering both `VERIFY_EMAIL` and `UPDATE_PASSWORD` in
-sequence. If this send fails, it does **not** fail the request — the user/roles/local row are already
-fully valid at that point, so the response is still `201`, with a `warnings` entry instead:
+`201` with the created user:
+
+```json
+{ "data": { "id": "...", "username": "mira.live", "email": "mira@example.org", "firstName": "Mira",
+  "lastName": "Live", "status": "ACTIVE", "roles": ["FACILITY_ADMIN"], "facilityScope": "Kigali",
+  "lastLoginAt": null, "createdAt": "..." } }
+```
+
+No separate "send invite" step is exposed — creation handles it automatically.
+
+**Checks that run first — no transaction, no write.** In this order: body validation → every `roleId`
+exists locally → email not already used (case-insensitively) → username not already used → **every
+role already exists as a Keycloak realm role** (a read-only Keycloak call; a role created in the
+Roles screen only reaches Keycloak once its permissions are synced, Milestone 4). A rejection at any
+of these touches nothing; a duplicate email makes **zero** Keycloak calls.
+
+**Invitation email.** One action-token email covering both `VERIFY_EMAIL` and `UPDATE_PASSWORD` in
+sequence, link valid for **72 hours** (`KEYCLOAK_INVITE_LIFESPAN_SECONDS`, matching this platform's
+existing `onboard-insights-user.sh` precedent). The link sends the user on to `cce-admin-ui`
+(`KEYCLOAK_INVITE_CLIENT_ID` / `KEYCLOAK_INVITE_REDIRECT_URI`). If the send fails, it does **not** fail
+the request — the user/roles/local row are already fully valid at that point, so the response is still
+`201`, with a `warnings` entry instead:
 ```json
 { "data": { "...": "..." }, "warnings": ["Invitation email could not be sent — use Reset Password to resend"] }
 ```
 The same failure is noted in that `USER_CREATED` audit row's `after` JSON (`"inviteEmailSent": false`)
 rather than written as a separate audit action. No automatic retry — `POST /users/:id/reset-password`
-is the recovery path, same as for an expired/lost link (see that endpoint below).
+(Milestone 6) is the recovery path, same as for an expired/lost link (see that endpoint below). A realm
+with no SMTP configured fails every send this way — locally run `scripts/setup-local-mail.sh`.
 
-**Partial failure (B-32) — two different shapes, handled differently.**
+**Partial failure (B-32) — three different shapes, handled differently.**
+- **Keycloak definitively refuses the account** because that username/email already exists *there*
+  (e.g. a user created directly in Keycloak, unknown to this console) → the local transaction rolls
+  back, nothing persists, and the response is `409 EMAIL_IN_USE` / `USERNAME_IN_USE` — a clean "no",
+  not a `502`.
 - **A Keycloak call itself fails** (account creation or role assignment) → the whole local
-  transaction rolls back, nothing persists locally. If the failure was a definitive rejection, this
-  is fully clean (Keycloak created nothing either). If it was an **ambiguous** failure (a timeout),
-  Keycloak may have actually succeeded despite no confirmation reaching us — an accepted residual
-  risk of this ordering, not something this release detects or reconciles (see
-  [architecture-overview.md §7](architecture-overview.md#7-consistency-model)).
+  transaction rolls back, nothing persists locally, `502 KEYCLOAK_SYNC_FAILED`. If the failure was a
+  definitive rejection, this is fully clean (Keycloak created nothing either). If it was an
+  **ambiguous** failure (a timeout), Keycloak may have actually succeeded despite no confirmation
+  reaching us — an accepted residual risk of this ordering, not something this release detects or
+  reconciles (see [architecture-overview.md §7](architecture-overview.md#7-consistency-model)).
 - **Keycloak's account creation is confirmed, but role assignment fails, or the final commit fails
   after both Keycloak calls already succeeded** → Keycloak's success is *not* ambiguous here, so this
   case is always traceable: a reconciliation row is written in its own, immediately-committed
   transaction — `action=USER_PROVISIONING_FAILED`, `entity_type='USER'`,
   `entity_id=<the Keycloak account's own id>` (not a local `users.id` — none survives), `after=
-  {keycloakId, username, email, reason}` — *before* the main transaction rolls back. See
-  [data-dictionary.md §2.2](data-dictionary.md#22-admin_audit_logaction).
+  {keycloakId, username, email, reason}` — *before* the main transaction rolls back, then
+  `502 KEYCLOAK_SYNC_FAILED`. See [data-dictionary.md §2.2](data-dictionary.md#22-admin_audit_logaction).
 
-No email is sent in either case, since the email step only runs after a successful commit — nobody
-gets a link to an account that isn't fully, durably usable yet. There is no automatic cleanup of an
-orphaned Keycloak account in this release — manual reconciliation only.
+No email is sent in either `502` case, since the email step only runs after a successful commit —
+nobody gets a link to an account that isn't fully, durably usable yet. There is no automatic cleanup
+of an orphaned Keycloak account in this release — manual reconciliation only.
 
 | Status | Cause |
 |---|---|
-| `400` | `VALIDATION_ERROR` — missing/invalid fields, or an unknown `roleId` |
-| `409` | `EMAIL_IN_USE` |
-| `502` | `KEYCLOAK_SYNC_FAILED` |
+| `400` | `VALIDATION_ERROR` — missing/invalid fields, malformed JSON, or an unknown `roleId` |
+| `409` | `EMAIL_IN_USE` — locally (any letter case) or already in Keycloak |
+| `409` | `USERNAME_IN_USE` — locally (any letter case) or already in Keycloak |
+| `409` | `ROLE_NOT_SYNCED` — a chosen role is not in Keycloak yet; open its Permissions tab and Save or Re-sync first |
+| `502` | `KEYCLOAK_SYNC_FAILED` — nothing was saved (or, for the confirmed-account shapes above, only the reconciliation audit row) |
 
 ### `GET /admin/v1/users/:id`, `PUT /admin/v1/users/:id`
 
