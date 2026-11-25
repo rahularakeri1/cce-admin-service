@@ -785,3 +785,50 @@ ESTIMATED EFFORT
   TOTAL: ~55 hours (~7.5 working days), plus A0 review time
 
 ================================================================================
+
+================================================================================
+ADDENDUM — MILESTONES 7-8 (post-PRD): ROLE-AWARE CONSOLE + PROTOCOL MANAGEMENT
+================================================================================
+Agreed 2026-11-25; see cce-admin-module-subtasks.txt for the decisions and the
+integrated exit checks. Same "docs first" rule: update the matching docs/ file in
+the same PR. The numbering of A0-A16 above is unchanged.
+
+SUB-TASK A17: Service-Level Authorization                           (~3 hours)
+  1. SecurityConfig: /admin/v1/protocols/** needs PROTOCOL_MANAGER or SUPER_ADMIN;
+     /admin/v1/me, /me/menus any signed-in ACTIVE user; health + Swagger open;
+     every other /admin/v1/** needs SUPER_ADMIN. Roles from realm_access.roles
+     (the JwtRoleConverter already produces them as authorities).
+  2. Shared test helper granting the SUPER_ADMIN authority; existing integration
+     tests switch to it. New tests: each row of the table allowed/denied, a token
+     with no roles gets 403 on management endpoints but 200 on /me, a missing
+     token is still 401.
+  ACCEPTANCE: a limited user's token is refused on /admin/v1/users and /roles by
+  the SERVICE (gateway bypassed); SUPER_ADMIN behaviour is unchanged.
+
+SUB-TASK A18: Console-Aware Menus                                   (~3 hours)
+  1. V4__console_menus.sql: menus.console ('INSIGHTS' default | 'ADMIN'); seed
+     Users /users, Roles /roles, Menus /menus, Protocols /protocols as ADMIN and
+     link all four to SUPER_ADMIN. Idempotent.
+  2. GET /me/menus?console= (default INSIGHTS); GET /menus returns console.
+  ACCEPTANCE: GET /me/menus?console=ADMIN as SUPER_ADMIN returns the four entries;
+  a role without them gets none; the default call still returns the 7 insights menus.
+
+SUB-TASK A19: Protocol Gateway + Endpoints + Audit                  (~5 hours)
+  1. ProtocolGateway interface + HTTP implementation (explicit timeouts,
+     PROTOCOL_SERVICE_URL, 2 MB body limit); a fake for tests.
+  2. GET /protocols, GET /protocols/:id, POST /protocols, POST /protocols/:id/retire
+     as in api-reference.md; protocol-service 400/422 -> readable 4xx, unreachable
+     -> 502 PROTOCOL_SERVICE_UNAVAILABLE.
+  3. Audit PROTOCOL_UPLOADED / PROTOCOL_RETIRED, only on success.
+  ACCEPTANCE: a failed or rejected upload writes no audit row; a duplicate
+  (url, version) is a readable error, not a 500.
+
+SUB-TASK A20: Seed PROTOCOL_MANAGER                                 (~2 hours)
+  1. V5__seed_protocol_manager.sql as in data-dictionary.md; document the gateway
+     sync as a deploy step; add the role to the bootstrap/deployment notes.
+  ACCEPTANCE: after migration and a gateway sync, PROTOCOL_MANAGER can be assigned
+  to a user (no ROLE_NOT_SYNCED), and that user's menus are exactly Protocols.
+
+  ADDENDUM TOTAL: ~13 hours
+
+================================================================================
