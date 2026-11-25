@@ -22,6 +22,28 @@ public interface KeycloakGateway {
 
   void assignRealmRoles(String keycloakUserId, Collection<String> roleNames);
 
+  /**
+   * Looks a user up by USERNAME — the one identifier that never changes (no keycloak_id is stored
+   * locally, and email is editable). Throws SyncFailedException if Keycloak has no such user.
+   */
+  String findUserId(String username);
+
+  /**
+   * Overwrites the profile fields (and the email-verified flag, unless null).
+   *
+   * @return the profile as it was BEFORE the change, so the caller can restore it exactly
+   */
+  KeycloakUserProfile updateUser(String keycloakUserId, KeycloakUserProfile profile);
+
+  /** Enables or disables the account (a disabled account cannot log in or refresh). */
+  void setEnabled(String keycloakUserId, boolean enabled);
+
+  /** Removes exactly these realm roles (a name the user doesn't hold is ignored). */
+  void removeRealmRoles(String keycloakUserId, Collection<String> roleNames);
+
+  /** Ends every session of the user, so already-issued refresh tokens stop working at once. */
+  void logoutUser(String keycloakUserId);
+
   /** Sends ONE email carrying all the given required actions, valid for {@code lifespanSeconds}. */
   void sendActionsEmail(String keycloakUserId, List<String> actions, long lifespanSeconds);
 }

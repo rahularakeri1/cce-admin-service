@@ -14,6 +14,7 @@ public record UserResponse(
     String status,
     List<String> roles,
     String facilityScope,
+    boolean isSystem,
     OffsetDateTime lastLoginAt,
     OffsetDateTime createdAt) {
 
@@ -27,6 +28,7 @@ public record UserResponse(
         u.getStatus().name(),
         roleNames,
         u.getFacilityScope(),
+        u.isSystem(),
         u.getLastLoginAt(),
         u.getCreatedAt());
   }

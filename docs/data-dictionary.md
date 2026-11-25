@@ -49,6 +49,7 @@ A person who can sign in to a CCE console. Mirrored 1:1 with a Keycloak user; jo
 | `last_name` | `VARCHAR(100)` | No | — | — |
 | `status` | `VARCHAR(20)` | No | `'ACTIVE'` | `ACTIVE` \| `INACTIVE` — see §2.1 |
 | `facility_scope` | `VARCHAR(255)` | Yes | — | Stored and displayed only this release; not enforced (PRD §2 Out of scope) |
+| `is_system` | `BOOLEAN` | No | `false` | **System-created account** (the first admin, set only by `scripts/bootstrap-admin.sh`). Read-only in the console: it cannot be edited, deactivated or have its roles changed by anyone (`409 SYSTEM_USER_IMMUTABLE`); only password reset is allowed. Mirrors `roles.is_system`. Added by V3 |
 | `last_login_at` | `TIMESTAMPTZ` | Yes | — | **Resolved** (PRD §12 flagged this as unspecified — decided here). Updated as a side effect of `GET /me`: set to the JWT's `auth_time` claim (the actual login moment — constant across token refreshes, unlike `iat`), written only when that login is **newer than the stored value** (`last_login_at IS NULL OR last_login_at < auth_time`), so one session never writes twice and a quick re-login still registers. If the token has no `auth_time`, falls back to `now()`, throttled to one write per 5 minutes (`last_login_at < now() - interval '5 minutes'`). No new endpoint, no Keycloak webhook — see api-reference.md's `GET /me` |
 | `created_at` | `TIMESTAMPTZ` | No | `now()` | — |
 | `updated_at` | `TIMESTAMPTZ` | No | `now()` | — |
@@ -263,7 +264,7 @@ resolve to a row in this schema, by design.
 | Value | Description |
 |---|---|
 | `ACTIVE` | Normal state. Keycloak account enabled |
-| `INACTIVE` | Deactivated — terminal for this release, no hard delete. Keycloak account disabled. `user_roles` retained for re-activation |
+| `INACTIVE` | Deactivated — "terminal" in the PRD means there is **no hard delete**, not that it can't be undone: `PATCH /users/:id/status` back to `ACTIVE` re-enables the account (B-34). Keycloak account disabled. `user_roles` retained for re-activation |
 
 > **Simplified from the PRD.** Appendix B also lists a `LOCKED` value (as a `403 FORBIDDEN` cause), but
 > no requirement describes what sets or clears it — `PATCH /users/:id/status` (B-34) only documents
@@ -285,7 +286,8 @@ exhaustive — any future mutating endpoint needs its own value here.
 | `USER_DEACTIVATED` | `PATCH /users/:id/status` → `INACTIVE` (B-34) |
 | `USER_REACTIVATED` | `PATCH /users/:id/status` → `ACTIVE` (B-34) |
 | `USER_ROLES_UPDATED` | `PUT /users/:id/roles` (B-35) |
-| `USER_PASSWORD_RESET` | `POST /users/:id/reset-password` (B-36) |
+| `USER_PASSWORD_RESET` | `POST /users/:id/reset-password` (B-36) — `after` = `{email}`; written only when the email was actually sent |
+| `USER_SYNC_FAILED` | `PUT /users/:id`, `PATCH /users/:id/status`, `PUT /users/:id/roles` — when a Keycloak change had to be reversed and **the reversal itself failed** (or the local commit failed and Keycloak could not be put back), so Keycloak and the database may now disagree for that user. Own transaction, `entity_id` = the local `users.id`, `after` = `{operation, username, reason, note}`. A clean failure (reversal succeeded) writes nothing |
 | `ROLE_CREATED` | `POST /roles` |
 | `ROLE_UPDATED` | `PUT /roles/:id` |
 | `ROLE_DELETED` | `DELETE /roles/:id` |
@@ -303,6 +305,7 @@ No migration exists yet. Suggested layout per milestone B1 (PRD §10):
 |---|---|---|
 | V1 | `V1__create_admin_service_schema.sql` | The **six** tables this service owns (`users`, `roles`, `menus`, `role_menus`, `user_roles`, `admin_audit_log`), straight from §1.1–1.5 and §1.7 of this document, created in `ccedb`'s `public` schema with ledger `flyway_schema_history_admin`. Does **not** touch `api_permissions` — that table already exists (§1.6). Have a reviewer diff the columns against this file before merging (PRD milestone note) |
 | V2 | `V2__seed.sql` | The **7** real `cce-insights-ui` sidebar menus (§1.3 — Dashboard, Facilities, Compliance, Deviations, Patients, Events, Ingestion, matching `Sidebar.tsx`; the PRD's 12-menu NAV/DETAIL model is not used), the `SUPER_ADMIN` system role (§1.2) linked to all 7, and 7 bootstrap `api_permissions` rows (`permission_name = 'SUPER_ADMIN'`, category `Admin`: `GET /admin/v1/me`, `GET /admin/v1/me/menus`, and `GET/POST/PUT/PATCH/DELETE /admin/v1/**`) — inserted as rows into the existing table, not a schema change. Idempotent (`ON CONFLICT` / `WHERE NOT EXISTS`). Seeds **no named admin account** — the first `SUPER_ADMIN` is provisioned per environment by `scripts/bootstrap-admin.sh` (see [architecture-overview.md §9.4](architecture-overview.md#94-bootstrap-sequencing--no-concrete-owner-yet)) |
+| V3 | `V3__users_system_flag.sql` | Adds `users.is_system` (`BOOLEAN NOT NULL DEFAULT false`). Nothing is flagged by the migration itself; re-run `scripts/bootstrap-admin.sh` once to flag an already-bootstrapped admin. |
 
 `pgcrypto` must be enabled in V1 before any `gen_random_uuid()` default is used — check first whether
 another service sharing `ccedb` has already enabled it.

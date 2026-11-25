@@ -140,6 +140,7 @@ class UserCreationIntegrationTest {
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.email").value(email))
         .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+        .andExpect(jsonPath("$.data.isSystem").value(false)) // only the bootstrap script makes system accounts
         .andExpect(jsonPath("$.data.roles[0]").value(role.getName()))
         .andExpect(jsonPath("$.data.lastLoginAt").doesNotExist())
         .andExpect(jsonPath("$.warnings").doesNotExist());

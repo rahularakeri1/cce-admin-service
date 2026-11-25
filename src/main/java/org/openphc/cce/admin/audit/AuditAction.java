@@ -4,6 +4,7 @@ package org.openphc.cce.admin.audit;
 public enum AuditAction {
   USER_CREATED,
   USER_PROVISIONING_FAILED,
+  USER_SYNC_FAILED,
   USER_UPDATED,
   USER_DEACTIVATED,
   USER_REACTIVATED,

@@ -18,6 +18,8 @@ public interface UserRepository extends JpaRepository<User, UUID>, JpaSpecificat
 
   boolean existsByUsernameIgnoreCase(String username);
 
+  boolean existsByEmailAndIdNot(String email, UUID id);
+
   /** Only ever moves last_login_at forward — the SQL guard backs up the service's own pre-check. */
   @Modifying
   @Query(

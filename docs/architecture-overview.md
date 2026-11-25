@@ -203,6 +203,11 @@ mutation:
   transaction *before* the main transaction is rolled back, with `entity_id` set to the Keycloak
   account's own id. There is no UI for reconciliation in this release — an operator reads
   `admin_audit_log` directly.
+- **User edits, status changes and role changes (Milestone 6)** use the same local-first shape as creation, plus
+  a **reversal** step: each Keycloak change is paired with the call that undoes it (`KeycloakChangeSet`).
+  A failing call reverses the ones already applied, then the local transaction rolls back; a failing
+  *commit* reverses Keycloak too. Only if a reversal itself fails is a `USER_SYNC_FAILED` row written
+  (own transaction) because Keycloak and the database may now disagree.
 - A role's realm role must exist in Keycloak (i.e. a successful sync) **before** it can be assigned
   to any user — not because `gateway-service`'s enforcement would otherwise be stale (its permission
   cache reloads as an unconditional first step of the sync call, even if the sync's second step then
@@ -295,7 +300,9 @@ Two bootstrap problems are listed as risks in the PRD (§12) without an owner:
   rows). Reference data, identical in every environment, no personal data.
 - **Per-environment script (`scripts/bootstrap-admin.sh [email]`)** — the first `SUPER_ADMIN`
   *account*: creates the Keycloak realm role if gateway hasn't yet synced it, assigns it to an
-  existing Keycloak user, and inserts the local `users` + `user_roles` rows. Idempotent. A named
+  existing Keycloak user, enables it, and inserts the local `users` + `user_roles` rows, flagging the user
+  `is_system` so the console treats it as a read-only system account (Milestone 6: otherwise any other
+  admin could lock the platform's own admin out). Idempotent, so it is also the recovery tool. A named
   admin never lives in a migration.
 
 ### 9.5 Deferred for a future release

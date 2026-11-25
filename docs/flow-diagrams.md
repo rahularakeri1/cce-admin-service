@@ -77,24 +77,35 @@ Keycloak ties up local DB connections for longer than a design that committed lo
 
 ## Flow 3 — Role assignment diff
 
-`PUT /admin/v1/users/:id/roles` (B-35). The request carries the **full desired set**; this service
-computes the delta rather than touching Keycloak role-by-role for the whole set.
+`PUT /users/:id/roles` (B-35). The request carries the **full desired set**; this service computes the
+delta rather than touching Keycloak role-by-role for the whole set. Like creation (Flow 2) it is
+**local-first with rollback** — an earlier draft of this flow changed Keycloak first, which could leave
+Keycloak changed with nothing recorded locally.
 
 ```mermaid
 flowchart TD
-    A["PUT /users/:id/roles { roleIds: [...] }"] --> B["load current user_roles for this user"]
+    A["PUT /users/:id/roles { roleIds: [...] }"] --> B["load current user_roles; unknown roleId → 400"]
     B --> C["compute added = requested − current<br/>removed = current − requested"]
     C --> D{"added or removed non-empty?"}
-    D -->|no| E["200 — no Keycloak call, no audit row changes roles"]
-    D -->|yes| F["assign 'added' realm roles in Keycloak<br/>remove 'removed' realm roles in Keycloak"]
-    F -->|fails| G["502 KEYCLOAK_SYNC_FAILED"]
-    F -->|succeeds| H["replace user_roles rows to match requested set"]
-    H --> I["admin_audit_log USER_ROLES_UPDATED { before: current, after: requested }"]
-    I --> J["200"]
+    D -->|no| E["200 — no Keycloak call, no audit row"]
+    D -->|yes| F{"every ADDED role a Keycloak realm role?<br/>(read-only call)"}
+    F -->|no| F2["409 ROLE_NOT_SYNCED — nothing written"]
+    F -->|yes| F3{"removing SUPER_ADMIN from the<br/>last active holder?"}
+    F3 -->|yes| F4["409 LAST_SUPER_ADMIN — nothing written"]
+    F3 -->|no| G["BEGIN: replace user_roles + audit USER_ROLES_UPDATED (uncommitted)"]
+    G --> H["Keycloak: assign ONLY the added roles, then remove ONLY the removed roles"]
+    H -->|a call fails| I["reverse the calls already applied (best effort), ROLLBACK — 502 KEYCLOAK_SYNC_FAILED"]
+    H -->|succeeds| J["COMMIT"]
+    J -->|commit fails| K["reverse Keycloak (best effort) — 502 KEYCLOAK_SYNC_FAILED"]
+    J -->|succeeds| L["200"]
+    I -->|a reversal failed too| M["USER_SYNC_FAILED audit row, own transaction"]
+    K -->|a reversal failed too| M
 ```
 
 Only the changed realm roles are touched in Keycloak — a user with 5 roles who gains a 6th causes one
-Keycloak role-assignment call, not six.
+Keycloak role-assignment call, not six. The same shape (local change + audit → Keycloak changes, each with
+its reversal → commit) is used by profile edits and by deactivate/reactivate, which additionally ends the
+user's Keycloak sessions.
 
 ---
 

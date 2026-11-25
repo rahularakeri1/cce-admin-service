@@ -36,6 +36,26 @@ public class ConflictException extends ApiException {
             + " — open the role's Permissions tab and Save or Re-sync first");
   }
 
+  public static ConflictException systemUserImmutable(String username) {
+    return new ConflictException(
+        "SYSTEM_USER_IMMUTABLE",
+        "System account " + username + " cannot be edited, deactivated or have its roles changed from the console");
+  }
+
+  public static ConflictException cannotDeactivateSelf() {
+    return new ConflictException("CANNOT_DEACTIVATE_SELF", "You cannot deactivate your own account");
+  }
+
+  public static ConflictException lastSuperAdmin() {
+    return new ConflictException(
+        "LAST_SUPER_ADMIN",
+        "This is the last active SUPER_ADMIN; doing this would leave nobody able to administer the console");
+  }
+
+  public static ConflictException userNotActive(String username) {
+    return new ConflictException("USER_NOT_ACTIVE", "User " + username + " is not active; reactivate them first");
+  }
+
   public static ConflictException roleNameReserved(String name) {
     return new ConflictException(
         "ROLE_NAME_RESERVED",
