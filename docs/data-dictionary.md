@@ -43,8 +43,8 @@ A person who can sign in to a CCE console. Mirrored 1:1 with a Keycloak user; jo
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
 | `id` | `UUID` | No | `gen_random_uuid()` | Primary key |
-| `username` | `VARCHAR(100)` | No | — | Display/search identifier |
-| `email` | `VARCHAR(255)` | No | — | Unique; also the Keycloak account's email |
+| `username` | `VARCHAR(100)` | No | — | Display/search identifier. **Stored lower-case** (Keycloak lower-cases it too). No DB unique constraint, but `POST /users` rejects a duplicate case-insensitively (`409 USERNAME_IN_USE`) |
+| `email` | `VARCHAR(255)` | No | — | Unique; also the Keycloak account's email. **Always stored lower-case**: the JWT `email` claim is matched against this column exactly, and Keycloak lower-cases emails, so a mixed-case local value would lock that user out with a `403` |
 | `first_name` | `VARCHAR(100)` | No | — | — |
 | `last_name` | `VARCHAR(100)` | No | — | — |
 | `status` | `VARCHAR(20)` | No | `'ACTIVE'` | `ACTIVE` \| `INACTIVE` — see §2.1 |
@@ -279,7 +279,7 @@ exhaustive — any future mutating endpoint needs its own value here.
 
 | Value | Written by |
 |---|---|
-| `USER_CREATED` | `POST /users` (B-31) — `after` includes `"inviteEmailSent": false` if the automatic invite email failed to send (non-fatal; see api-reference.md) |
+| `USER_CREATED` | `POST /users` (B-31) — `after` = `{userId, username, email, roles[], facilityScope}`, plus `"inviteEmailSent": false` added after the commit if the automatic invite email failed to send (non-fatal; see api-reference.md). Absent when the email went out |
 | `USER_PROVISIONING_FAILED` | `POST /users`, when Keycloak's account creation is confirmed but role assignment fails, or the final local commit fails after both Keycloak calls succeed (B-32) — the one action whose `entity_id` is a Keycloak account id, not a local row (§1.7). Not written when the account-creation call itself fails — that case rolls back cleanly with nothing to reconcile, or carries an accepted residual risk if the failure was ambiguous (architecture-overview.md §7) |
 | `USER_UPDATED` | `PUT /users/:id` |
 | `USER_DEACTIVATED` | `PATCH /users/:id/status` → `INACTIVE` (B-34) |

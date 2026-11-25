@@ -22,11 +22,14 @@ Keycloak calls already succeeded, rolls the local transaction back.
 
 ```mermaid
 flowchart TD
-    A["POST /admin/v1/users"] --> B["validate body — 400 VALIDATION_ERROR"]
-    B --> C{"email already exists?"}
-    C -->|yes| D["409 EMAIL_IN_USE — no transaction opened, no Keycloak call made"]
-    C -->|no| E["BEGIN transaction:<br/>insert users row + user_roles rows<br/>insert admin_audit_log USER_CREATED<br/>(both uncommitted)"]
+    A["POST /admin/v1/users"] --> B["validate body, lower-case email + username — 400 VALIDATION_ERROR"]
+    B --> C{"email / username already exists?<br/>unknown roleId?"}
+    C -->|yes| D["409 EMAIL_IN_USE / USERNAME_IN_USE or 400 — no transaction opened, no Keycloak call made"]
+    C -->|no| C2{"every role exists as a<br/>Keycloak realm role? (read-only call)"}
+    C2 -->|no| C3["409 ROLE_NOT_SYNCED — nothing written"]
+    C2 -->|yes| E["BEGIN transaction:<br/>insert users row + user_roles rows<br/>insert admin_audit_log USER_CREATED<br/>(both uncommitted)"]
     E --> F["create Keycloak user account"]
+    F -->|Keycloak says it already has that user| G0["ROLLBACK — 409 EMAIL_IN_USE / USERNAME_IN_USE<br/>(a definitive no: Keycloak created nothing)"]
     F -->|fails| G["ROLLBACK transaction — 502 KEYCLOAK_SYNC_FAILED<br/>(ambiguous/timeout failure here = accepted residual risk, see note)"]
     F -->|succeeds| H["assign realm roles in Keycloak"]
     H -->|fails| I["audit USER_PROVISIONING_FAILED in its OWN transaction,<br/>entity_id = Keycloak account id — THEN rollback main transaction<br/>— 502 KEYCLOAK_SYNC_FAILED"]

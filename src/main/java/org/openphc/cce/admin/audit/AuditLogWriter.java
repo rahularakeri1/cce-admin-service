@@ -24,7 +24,7 @@ public class AuditLogWriter {
   }
 
   /** Writes as part of whatever transaction is already open (the common, default case). */
-  public void write(
+  public UUID write(
       UUID actorId,
       AuditAction action,
       String entityType,
@@ -42,6 +42,31 @@ public class AuditLogWriter {
     row.setAfter(toJson(after));
     row.setIpAddress(ipAddress);
     repository.save(row);
+    return row.getId();
+  }
+
+  /**
+   * After a user-creation commit: records that the invitation email could not be sent by adding
+   * {@code "inviteEmailSent": false} to that USER_CREATED row's {@code after} JSON, instead of
+   * writing a separate audit action (docs/api-reference.md → POST /users). Own transaction: it runs
+   * after the main one has committed.
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void markInviteEmailFailed(UUID auditRowId) {
+    repository
+        .findById(auditRowId)
+        .ifPresent(
+            row -> {
+              try {
+                com.fasterxml.jackson.databind.node.ObjectNode after =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(row.getAfter());
+                after.put("inviteEmailSent", false);
+                row.setAfter(objectMapper.writeValueAsString(after));
+                repository.save(row);
+              } catch (Exception e) {
+                throw new IllegalStateException("Failed to update audit payload", e);
+              }
+            });
   }
 
   /**
@@ -50,7 +75,7 @@ public class AuditLogWriter {
    * docs/flow-diagrams.md Flow 2). REQUIRES_NEW suspends any existing transaction for this call.
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void writeInNewTransaction(
+  public UUID writeInNewTransaction(
       UUID actorId,
       AuditAction action,
       String entityType,
@@ -58,7 +83,7 @@ public class AuditLogWriter {
       Object before,
       Object after,
       String ipAddress) {
-    write(actorId, action, entityType, entityId, before, after, ipAddress);
+    return write(actorId, action, entityType, entityId, before, after, ipAddress);
   }
 
   private String toJson(Object value) {

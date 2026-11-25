@@ -128,6 +128,31 @@ Suggested build order:
 4. Diff against the **last-fetched state only** to enable/disable Save on forms — the payload sent
    is always the complete replacement set, never a partial diff (F-11, F-13, F-14).
 
+### Local email for user invitations (needed to see the invitation link)
+
+Creating a user makes **Keycloak** email them a verify-and-set-password link, and your local realm has no
+SMTP. Without it every creation succeeds but warns "Invitation email could not be sent".
+
+```bash
+scripts/setup-local-mail.sh       # starts Mailpit on the compose network, points realm `cce` SMTP at it
+```
+
+Then open **http://localhost:8025**: every email Keycloak sends shows up there with its link. Clicking
+it walks through verify-email → set-password, after which the user can log in. Dev only — never run
+against a shared realm. Keycloak admin credentials for the service itself: `KEYCLOAK_ADMIN_*` in
+`application.yml` (defaults work locally; architecture-overview.md §9.8).
+
+**Real inboxes instead of Mailpit.** Mailpit never delivers outside your machine. To have the invitation land
+in a real mailbox, point the realm at a real SMTP server — your credentials stay in your own shell:
+
+```bash
+SMTP_HOST=smtp.gmail.com SMTP_PORT=587 SMTP_USER=you@gmail.com SMTP_PASSWORD='app-password' \
+SMTP_FROM=you@gmail.com scripts/setup-realm-smtp.sh        # Gmail needs an APP PASSWORD, not your login one
+```
+
+From then on every user you create gets a real email, so only use addresses you own while testing. Switch
+back with `scripts/setup-local-mail.sh`. Details and other providers are in the script's header.
+
 ### Running the gateway locally (needed for Permissions → sync)
 
 `gateway-service` is not in the compose stack, and its defaults point at another database and Keycloak.

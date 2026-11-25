@@ -340,3 +340,20 @@ Verified against a running gateway (Milestone 4): `POST /api/permissions/sync-to
   ingress (network policy or ingress rules) — that is the only protection today.
 - Not changed here: `gateway-service` belongs to another team. Raise it with them.
 
+### 9.8 How this service signs in to Keycloak's Admin API, and the email it triggers
+
+Two modes, chosen by `KEYCLOAK_ADMIN_CLIENT_SECRET` (see `application.yml`):
+
+- **Secret set → `client_credentials`** as a service-account client in the target realm (`cce`). Use this
+  in every real environment, with a client that has only the `manage-users` / `view-realm` /
+  `view-users` roles it needs. The client does not exist in `cce-realm.json` yet (see developer-setup.md).
+- **No secret → password grant** as `KEYCLOAK_ADMIN_USERNAME` in `KEYCLOAK_ADMIN_REALM` (default
+  `master`, user `admin`/`admin`). Local development only — it is the Keycloak super-admin.
+
+HTTP timeouts are explicit (5 s connect, 20 s read): user creation holds a database transaction open
+across the Keycloak calls, so a hung Keycloak must turn into a `502`, not a stuck request.
+
+The invitation email is sent by **Keycloak**, not this service, so the realm needs working SMTP. A realm
+without it fails every send; creation still succeeds with a `warnings` entry. `scripts/setup-local-mail.sh`
+wires the local realm to a Mailpit container (web UI `http://localhost:8025`) for development.
+

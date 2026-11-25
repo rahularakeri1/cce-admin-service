@@ -29,6 +29,20 @@ whenever standing up a new environment, and see
 [architecture-overview.md §9.2](architecture-overview.md#92-role-claim-path--confirm-before-keycloak-provisioning)
 for why `JWT_ROLES_CLAIM_PATH` specifically needs a live check, not just copying the default.
 
+## Keycloak Admin API and invitation email
+
+| Variable | Default | Notes |
+|---|---|---|
+| `KEYCLOAK_SERVER_URL` | `http://localhost:8081` | |
+| `KEYCLOAK_TARGET_REALM` | `cce` | Realm users and roles are managed in |
+| `KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET` | `admin-cli` / *(empty)* | **Set the secret in real environments**: then a service-account client (`manage-users` + `view-users` + `view-realm`) is used via `client_credentials` |
+| `KEYCLOAK_ADMIN_REALM` / `KEYCLOAK_ADMIN_USERNAME` / `KEYCLOAK_ADMIN_PASSWORD` | `master` / `admin` / `admin` | Password-grant fallback when no secret is set — local only, never a shared environment (B-13) |
+| `KEYCLOAK_INVITE_LIFESPAN_SECONDS` | `259200` (72 h) | Validity of the invitation link |
+| `KEYCLOAK_INVITE_CLIENT_ID` / `KEYCLOAK_INVITE_REDIRECT_URI` | `cce-admin-ui` / `http://localhost:3002/` | Where the user lands after finishing the link; the redirect must be a valid redirect URI of that client |
+
+The realm itself must have **SMTP configured** (Realm settings → Email) or every invitation fails with a
+warning; this service cannot do that for you.
+
 ## Gateway sync
 
 | Variable | Default | Notes |
