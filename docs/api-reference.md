@@ -221,7 +221,7 @@ is editable. A local user with no matching Keycloak account fails with `502`.
 
 ### `GET /admin/v1/users/:id`
 
-The same shape as a `POST` response (`roles` as role names, `lastLoginAt`). `404 USER_NOT_FOUND` for an
+The same shape as a `POST` response (`roles` as role names, `isSystem`, `lastLoginAt`). `404 USER_NOT_FOUND` for an
 unknown id, `400` for a malformed one.
 
 ### `PUT /admin/v1/users/:id`
@@ -262,6 +262,7 @@ Asking for the status the user already has is a no-op: `200`, no Keycloak call, 
 
 | Status | Cause |
 |---|---|
+| `409` | `SYSTEM_USER_IMMUTABLE` — the target is a system account |
 | `409` | `CANNOT_DEACTIVATE_SELF` — you cannot deactivate your own account |
 | `409` | `LAST_SUPER_ADMIN` — would leave no active `SUPER_ADMIN` |
 | `404` / `400` | unknown user / invalid `status` |
@@ -283,6 +284,7 @@ is a no-op (`200`, no Keycloak call, no audit row). Audits `USER_ROLES_UPDATED` 
 | Status | Cause |
 |---|---|
 | `400` | unknown `roleId` |
+| `409` | `SYSTEM_USER_IMMUTABLE` — the target is a system account |
 | `409` | `ROLE_NOT_SYNCED` — a role being **added** is not a Keycloak realm role yet (checked before anything is written); open its Permissions tab and Save or Re-sync first |
 | `409` | `LAST_SUPER_ADMIN` — removing `SUPER_ADMIN` from the only active holder |
 | `502` | `KEYCLOAK_SYNC_FAILED` — local roles unchanged; any Keycloak change already made was reversed |
@@ -309,8 +311,18 @@ button — for any user with `status = ACTIVE` and `last_login_at IS NULL` (neve
 their detail page.
 
 **Lockout guards (not in the PRD).** The first admin is created by hand, so the console refuses actions
-that would leave nobody able to administer it: a user cannot deactivate **themselves**, and the **last
-active `SUPER_ADMIN`** cannot be deactivated or have the role removed.
+that would leave nobody able to administer it:
+
+- **System accounts are read-only.** A user with `isSystem = true` (the bootstrap admin) cannot be edited,
+  deactivated or have its roles changed by **anyone** — `PUT /users/:id`, `PATCH /users/:id/status` (even to
+  its current value) and `PUT /users/:id/roles` all answer `409 SYSTEM_USER_IMMUTABLE`, before any Keycloak
+  call. Checked first, ahead of every rule below. **Password reset is the one exception**: it changes
+  nothing about the account and is the recovery path if that admin forgets their password. Users created
+  through the console are never system accounts.
+- A user cannot deactivate **themselves**.
+- The **last active `SUPER_ADMIN`** cannot be deactivated or have the role removed.
+
+A system account that was disabled out of band is restored by re-running `scripts/bootstrap-admin.sh`.
 
 ---
 

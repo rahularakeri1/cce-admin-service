@@ -473,6 +473,67 @@ class UserManagementIntegrationTest {
     assertThat(audit()).isEmpty();
   }
 
+  // ---- system accounts ------------------------------------------------------------------------
+
+  private User makeTargetSystem() {
+    target.setSystem(true);
+    return userRepository.save(target);
+  }
+
+  @Test
+  void aSystemAccountCannotBeEditedDeactivatedOrHaveItsRolesChanged() throws Exception {
+    makeTargetSystem();
+    give(target, roles.get(0));
+
+    callPut("/admin/v1/users/" + target.getId(), profile("Hacked", "Name", target.getEmail(), "Elsewhere"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error.code").value("SYSTEM_USER_IMMUTABLE"));
+    callPatch("/admin/v1/users/" + target.getId() + "/status", "{\"status\":\"INACTIVE\"}")
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error.code").value("SYSTEM_USER_IMMUTABLE"));
+    callPatch("/admin/v1/users/" + target.getId() + "/status", "{\"status\":\"ACTIVE\"}") // even a no-op change is refused
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error.code").value("SYSTEM_USER_IMMUTABLE"));
+    callPut("/admin/v1/users/" + target.getId() + "/roles", roleIds(roles.get(0), roles.get(1)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error.code").value("SYSTEM_USER_IMMUTABLE"));
+    callPut("/admin/v1/users/" + target.getId() + "/roles", roleIds())
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error.code").value("SYSTEM_USER_IMMUTABLE"));
+
+    verifyNoInteractions(keycloak); // refused before any Keycloak call
+    User saved = reload(target);
+    assertThat(saved.getFirstName()).isEqualTo("First");
+    assertThat(saved.getStatus()).isEqualTo(UserStatus.ACTIVE);
+    assertThat(saved.getFacilityScope()).isEqualTo("Kigali");
+    assertThat(roleNamesOf(target)).containsExactly(roles.get(0).getName());
+    assertThat(audit()).isEmpty();
+  }
+
+  @Test
+  void theSystemRuleAppliesToWhoeverIsActing() throws Exception {
+    // the actor here is an ordinary active user; the guard is about the TARGET, not the actor's own role
+    makeTargetSystem();
+    callPatch("/admin/v1/users/" + target.getId() + "/status", "{\"status\":\"INACTIVE\"}").andExpect(status().isConflict());
+    assertThat(reload(target).getStatus()).isEqualTo(UserStatus.ACTIVE);
+  }
+
+  @Test
+  void aSystemAccountCanStillBeSentAPasswordResetBecauseThatChangesNothingAboutIt() throws Exception {
+    makeTargetSystem();
+
+    callPost("/admin/v1/users/" + target.getId() + "/reset-password").andExpect(status().isOk());
+
+    verify(keycloak).sendActionsEmail(KC_ID, List.of("VERIFY_EMAIL", "UPDATE_PASSWORD"), 259200L);
+  }
+
+  @Test
+  void fetchingShowsWhetherAnAccountIsASystemAccount() throws Exception {
+    mockMvc.perform(get("/admin/v1/users/" + target.getId()).with(token())).andExpect(jsonPath("$.data.isSystem").value(false));
+    makeTargetSystem();
+    mockMvc.perform(get("/admin/v1/users/" + target.getId()).with(token())).andExpect(jsonPath("$.data.isSystem").value(true));
+  }
+
   // ---- POST reset-password --------------------------------------------------------------------
 
   @Test

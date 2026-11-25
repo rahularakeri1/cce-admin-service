@@ -36,6 +36,12 @@ public class ConflictException extends ApiException {
             + " — open the role's Permissions tab and Save or Re-sync first");
   }
 
+  public static ConflictException systemUserImmutable(String username) {
+    return new ConflictException(
+        "SYSTEM_USER_IMMUTABLE",
+        "System account " + username + " cannot be edited, deactivated or have its roles changed from the console");
+  }
+
   public static ConflictException cannotDeactivateSelf() {
     return new ConflictException("CANNOT_DEACTIVATE_SELF", "You cannot deactivate your own account");
   }

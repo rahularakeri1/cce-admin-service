@@ -93,6 +93,7 @@ public class UserManagementService {
 
   public Result updateProfile(UUID id, UpdateUserRequest request, UUID actorId, String ip) {
     User current = find(id);
+    assertNotSystem(current);
     String firstName = request.firstName().trim();
     String lastName = request.lastName().trim();
     String email = request.email().trim().toLowerCase();
@@ -156,6 +157,7 @@ public class UserManagementService {
 
   public UserResponse setStatus(UUID id, UserStatus target, UUID actorUserId, String ip) {
     User current = find(id);
+    assertNotSystem(current);
     if (current.getStatus() == target) {
       return toResponse(current); // already there: no Keycloak call, no audit row
     }
@@ -201,6 +203,7 @@ public class UserManagementService {
 
   public UserResponse replaceRoles(UUID id, ReplaceUserRolesRequest request, UUID actorId, String ip) {
     User current = find(id);
+    assertNotSystem(current);
     Set<UUID> requested = new LinkedHashSet<>(request.roleIds());
     Map<UUID, Role> known = roleRepository.findAllById(requested).stream().collect(Collectors.toMap(Role::getId, r -> r));
     for (UUID roleId : requested) {
@@ -354,6 +357,13 @@ public class UserManagementService {
     List<UUID> roleIds = userRoleRepository.findAllByUserId(user.getId()).stream().map(UserRole::getRoleId).toList();
     List<String> names = roleRepository.findAllById(roleIds).stream().map(Role::getName).sorted().toList();
     return UserResponse.from(user, names);
+  }
+
+  /** A system-created account is read-only. Reset-password is deliberately exempt: it changes nothing about the account. */
+  private static void assertNotSystem(User user) {
+    if (user.isSystem()) {
+      throw ConflictException.systemUserImmutable(user.getUsername());
+    }
   }
 
   private User find(UUID id) {

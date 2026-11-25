@@ -83,8 +83,9 @@ there is no UI path to create the first admin:
    rows for `/admin/v1/**` and `/admin/v1/me/menus`).
 2. Provision the first `SUPER_ADMIN` user — create the user in Keycloak, then run
    `scripts/bootstrap-admin.sh <email>` (set `KC_URL`, `KC_ADMIN_PASSWORD` and `PSQL` for the target
-   environment). It assigns the realm role and inserts the local `users` + `user_roles` rows; it is
-   idempotent. There is no self-service path.
+   environment). It assigns the realm role, enables the Keycloak account, inserts the local `users` + `user_roles`
+   rows and flags the user a read-only **system account**; it is idempotent and doubles as the recovery
+   tool for a disabled bootstrap admin. There is no self-service path.
 3. Confirm `GET /health` is reachable and unauthenticated (B-05) before wiring up monitoring that
    depends on it.
 4. Log in to `cce-admin-ui` as the bootstrap `SUPER_ADMIN` and run scenario S1 (sidebar loads) as the

@@ -300,7 +300,9 @@ Two bootstrap problems are listed as risks in the PRD (§12) without an owner:
   rows). Reference data, identical in every environment, no personal data.
 - **Per-environment script (`scripts/bootstrap-admin.sh [email]`)** — the first `SUPER_ADMIN`
   *account*: creates the Keycloak realm role if gateway hasn't yet synced it, assigns it to an
-  existing Keycloak user, and inserts the local `users` + `user_roles` rows. Idempotent. A named
+  existing Keycloak user, enables it, and inserts the local `users` + `user_roles` rows, flagging the user
+  `is_system` so the console treats it as a read-only system account (Milestone 6: otherwise any other
+  admin could lock the platform's own admin out). Idempotent, so it is also the recovery tool. A named
   admin never lives in a migration.
 
 ### 9.5 Deferred for a future release

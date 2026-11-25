@@ -36,6 +36,10 @@ public class User {
   @Column(name = "facility_scope")
   private String facilityScope;
 
+  /** System-created account (the bootstrap admin): read-only in the console. Mirrors roles.is_system. */
+  @Column(name = "is_system", nullable = false)
+  private boolean isSystem = false;
+
   @Column(name = "last_login_at")
   private OffsetDateTime lastLoginAt;
 
@@ -101,6 +105,14 @@ public class User {
 
   public void setFacilityScope(String facilityScope) {
     this.facilityScope = facilityScope;
+  }
+
+  public boolean isSystem() {
+    return isSystem;
+  }
+
+  public void setSystem(boolean system) {
+    isSystem = system;
   }
 
   public OffsetDateTime getLastLoginAt() {

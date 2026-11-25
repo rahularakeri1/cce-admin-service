@@ -94,8 +94,11 @@ realm in Keycloak, then:
 scripts/bootstrap-admin.sh testadmin@example.com
 ```
 
-It creates the realm role `SUPER_ADMIN` if missing, assigns it to that Keycloak user, and inserts the
-matching local `users` / `user_roles` rows. Safe to re-run. Env overrides: `KC_URL`, `KC_REALM`,
+It creates the realm role `SUPER_ADMIN` if missing, assigns it to that Keycloak user, **enables** the
+Keycloak account, and inserts the matching local `users` / `user_roles` rows, flagging the user as a
+**system account** (`is_system`, read-only in the console — nobody can deactivate or edit it). Safe to
+re-run, which makes it the **recovery tool** too: if that admin is ever disabled out of band, run it again.
+Run it after the service has started once, so Flyway V3 has added the flag. Env overrides: `KC_URL`, `KC_REALM`,
 `KC_ADMIN`, `KC_ADMIN_PASSWORD`, `PSQL` (see the script header). Without the local row, every
 `/admin/v1/**` call returns `403` even though the Keycloak login succeeds.
 
