@@ -77,6 +77,9 @@ fall back to `now()` at write time if it's ever absent, rather than skipping the
 
 ### `GET /me/menus`
 
+> **Planned — Milestone 7. Not implemented yet;** this is the agreed design, written first (docs-first).
+> Will accept `?console=INSIGHTS|ADMIN` (default `INSIGHTS`, so current callers are unchanged). `cce-admin-ui` will call it with `console=ADMIN` to build its own sidebar — see [architecture-overview.md §9.9](architecture-overview.md#99-planned-milestones-78--role-aware-console-and-protocol-management).
+
 A flat list of menus for every role the caller holds — a **union** across roles, not per-role. Only
 `is_active` menus are included, ordered by `sort_order` (B-21).
 
@@ -516,3 +519,57 @@ in the body rather than erroring, so load balancers can still reach the endpoint
 Generated from controllers via springdoc-openapi (B-06); served at the service's standard
 `/swagger-ui.html` and `/v3/api-docs`. Covers every endpoint above — if it doesn't, that's a gap in
 the controller annotations, not a gap in this document.
+
+---
+
+## Authorization (planned — Milestone 7)
+
+> **Planned — Milestone 7. Not implemented yet;** this is the agreed design, written first (docs-first).
+
+Roles are read from the token. The service refuses what a role may not do, independent of the gateway:
+
+| Endpoints | Required | Otherwise |
+|---|---|---|
+| `/admin/v1/health`, Swagger | none | |
+| `/admin/v1/me`, `/admin/v1/me/menus` | a signed-in, `ACTIVE` user | `401` / `403` |
+| `/admin/v1/protocols/**` | `PROTOCOL_MANAGER` or `SUPER_ADMIN` | `403 FORBIDDEN` |
+| every other `/admin/v1/**` | `SUPER_ADMIN` | `403 FORBIDDEN` |
+
+---
+
+## Protocols (planned — Milestone 8)
+
+> **Planned — Milestone 8. Not implemented yet;** this is the agreed design, written first (docs-first).
+
+`/admin/v1/protocols` — a thin, audited front for `cce-protocol-service`'s protocol definitions. Needs
+`PROTOCOL_MANAGER` or `SUPER_ADMIN`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | List, paged (`page`, `size`, `sort` pass through) |
+| `GET` | `/:id` | One definition |
+| `POST` | `/` | Upload (load) a PlanDefinition |
+| `POST` | `/:id/retire` | Retire |
+
+Not in v1: delete, rebuild-index, action definitions.
+
+### `POST /admin/v1/protocols`
+
+```json
+{ "planDefinitionJson": "{\"resourceType\":\"PlanDefinition\",\"url\":\"...\",\"version\":\"1.0.0\",\"action\":[...]}" }
+```
+
+The FHIR resource is passed as a **string** inside the envelope, exactly as `cce-protocol-service` expects.
+`201` with the stored definition (`id`, `url`, `version`, `canonical`, `status`, `loadedAt`, `definition`).
+Request bodies are limited to 2 MB.
+
+| Status | Cause |
+|---|---|
+| `400` / `422` | `cce-protocol-service` rejected it (blank, not a PlanDefinition, validation failure, `(url, version)` already loaded) — its reason is returned in `error.message` |
+| `403` | caller is neither `PROTOCOL_MANAGER` nor `SUPER_ADMIN` |
+| `502` | `PROTOCOL_SERVICE_UNAVAILABLE` — unreachable or timed out; nothing was uploaded |
+
+Audits `PROTOCOL_UPLOADED` (`entity_type = PROTOCOL`, `entity_id` = the definition id, `after` = `{url,
+version, canonical}`) **only when the upload succeeded**. `POST /:id/retire` audits `PROTOCOL_RETIRED` with
+the before/after status; `404` for an unknown id.
+

@@ -321,6 +321,8 @@ they came up during this review:
 
 ### 9.6 Authorization is enforced at the gateway, not in this service
 
+> **Superseded by Milestone 7 (planned)** — the service will enforce roles itself; see [§9.9](#99-planned-milestones-78--role-aware-console-and-protocol-management). Until then, what follows is the current behaviour.
+
 Every `/admin/v1/**` endpoint in this service requires a valid JWT and a local `ACTIVE` user — nothing
 more. *Which role may call which endpoint* is enforced by `gateway-service` against `api_permissions`
 (the `SUPER_ADMIN` rows seeded by `V2__seed.sql`), by design (§3). Consequences to know about:
@@ -363,4 +365,75 @@ across the Keycloak calls, so a hung Keycloak must turn into a `502`, not a stuc
 The invitation email is sent by **Keycloak**, not this service, so the realm needs working SMTP. A realm
 without it fails every send; creation still succeeds with a `warnings` entry. `scripts/setup-local-mail.sh`
 wires the local realm to a Mailpit container (web UI `http://localhost:8025`) for development.
+
+### 9.9 Planned (Milestones 7–8) — role-aware console and protocol management
+
+> **Planned — Milestone 7. Not implemented yet;** this is the agreed design, written first (docs-first).
+
+**Why.** Protocol definitions are loaded today with `curl` against `cce-protocol-service`; there is no
+screen, no access control beyond the gateway, and no record of who loaded what. Loading or retiring one
+changes clinical matching. So it must be restricted to the people meant to do it, grantable by a
+`SUPER_ADMIN`, and audited. The PRD covers users, roles, menus and permissions only — **this is a
+deliberate scope addition**, not a PRD requirement.
+
+**Decisions (agreed 2026-11-25)**
+
+1. **Through this service.** The UI calls `/admin/v1/protocols/**`; this service forwards to
+   `cce-protocol-service` and writes an `admin_audit_log` row for every upload and retire. The protocol
+   service has no authentication of its own and is never called from a browser.
+2. **`PROTOCOL_MANAGER` is a seeded standard role** (role + menu link + permission rows), not hand-typed.
+3. **v1 = protocol definitions only:** upload, list, view, retire. No delete, no rebuild-index, no action
+   definitions (retire is the safe action; the rest are follow-ups).
+4. **The admin console's tabs become menu entries.** `menus.console` distinguishes `INSIGHTS` from `ADMIN`
+   entries (Users, Roles, Menus, Protocols), and `cce-admin-ui` builds its sidebar from
+   `GET /me/menus?console=ADMIN`. **This reverses the earlier F-03 decision** that the admin sidebar is
+   static, and with it the "a user without permission still sees the link and gets an inline 403" stance:
+   a link a user can't use is now simply not shown. Menus remain the *soft* control; `api_permissions`
+   and the service-level checks below remain the *hard* one.
+5. **Service-level authorization**, closing §9.6. Roles are read from the token (`realm_access.roles`):
+
+| Endpoints | Required |
+|---|---|
+| `/admin/v1/health`, Swagger | none |
+| `/admin/v1/me`, `/admin/v1/me/menus` | any signed-in, `ACTIVE` user |
+| `/admin/v1/protocols/**` | `PROTOCOL_MANAGER` or `SUPER_ADMIN` |
+| everything else under `/admin/v1/**` (users, roles, menus, permissions) | `SUPER_ADMIN` |
+
+   Because the check is in the service, a limited user is refused even where the gateway is bypassed
+   (the local setup). The gateway rows stay as defence in depth. A role change takes effect when the
+   user's token refreshes.
+6. **Only a `SUPER_ADMIN` grants access** — a protocol manager never sees Users or Roles.
+
+**How a protocol upload flows**
+
+```mermaid
+sequenceDiagram
+    participant U as Protocol manager (cce-admin-ui)
+    participant A as cce-admin-service
+    participant P as cce-protocol-service
+    U->>A: POST /admin/v1/protocols {planDefinitionJson}
+    A->>A: token has PROTOCOL_MANAGER or SUPER_ADMIN? (else 403)
+    A->>P: POST /v1/protocol/protocol-definitions
+    alt protocol-service accepts (201)
+        P-->>A: stored definition
+        A->>A: admin_audit_log PROTOCOL_UPLOADED (id, url, version)
+        A-->>U: 201
+    else protocol-service rejects (400/422)
+        P-->>A: reason
+        A-->>U: readable 4xx — nothing audited
+    else unreachable / timeout
+        A-->>U: 502 PROTOCOL_SERVICE_UNAVAILABLE — nothing audited
+    end
+```
+
+An audit row is written only for a change that actually happened; unlike users and permissions there is no
+local copy to keep consistent, so there is no rollback or reconciliation story here.
+
+**Operational notes**
+- `PROTOCOL_SERVICE_URL` points at `cce-protocol-service`. Its default port (8090) collides with the local
+  gateway, so run it on another port (8091) in development.
+- The seeded `PROTOCOL_MANAGER` realm role reaches Keycloak through the gateway sync — a deploy step, as for
+  every role (§7).
+- Existing integration tests authenticate with a bare JWT; they gain a shared helper that grants
+  `SUPER_ADMIN`, and new tests prove each rule in the table.
 
