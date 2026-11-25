@@ -206,10 +206,41 @@ of an orphaned Keycloak account in this release — manual reconciliation only.
 | `409` | `ROLE_NOT_SYNCED` — a chosen role is not in Keycloak yet; open its Permissions tab and Save or Re-sync first |
 | `502` | `KEYCLOAK_SYNC_FAILED` — nothing was saved (or, for the confirmed-account shapes above, only the reconciliation audit row) |
 
-### `GET /admin/v1/users/:id`, `PUT /admin/v1/users/:id`
+All the endpoints below that also change Keycloak work **local-first with rollback**, like creation: a
+database transaction opens, the local change and its audit row are written, the Keycloak calls follow,
+and the transaction commits last. If a Keycloak call fails, the ones already applied are **reversed**
+(best effort) and the local transaction rolls back — nothing persists, `502 KEYCLOAK_SYNC_FAILED`. If the
+local commit fails after Keycloak changed, Keycloak is reversed the same way. If a *reversal* fails,
+Keycloak and the database may now disagree, so a `USER_SYNC_FAILED` row is written in its own transaction
+(see [data-dictionary.md §2.2](data-dictionary.md#22-admin_audit_logaction)); there is no automatic
+repair. See [flow-diagrams.md Flow 3](flow-diagrams.md#flow-3--role-assignment-diff).
 
-`PUT` updates `firstName`, `lastName`, `email`, `facilityScope` only — not `status` or roles, which
-have their own endpoints below. `404 USER_NOT_FOUND` if the id is unknown.
+Keycloak accounts are found by **username**, never by email: no `keycloak_id` is stored (see
+[data-dictionary.md §1.1](data-dictionary.md#11-users--console-accounts)), username is permanent, and email
+is editable. A local user with no matching Keycloak account fails with `502`.
+
+### `GET /admin/v1/users/:id`
+
+The same shape as a `POST` response (`roles` as role names, `lastLoginAt`). `404 USER_NOT_FOUND` for an
+unknown id, `400` for a malformed one.
+
+### `PUT /admin/v1/users/:id`
+
+```json
+{ "firstName": "...", "lastName": "...", "email": "...", "facilityScope": "..." }
+```
+
+Profile only — not username (permanent), `status` or roles. All three names/email are required;
+`facilityScope` may be null. Email is lower-cased.
+
+- **Changing the email** (a) must not belong to another user → `409 EMAIL_IN_USE` with zero Keycloak
+  calls; (b) sets it in Keycloak and marks it **unverified**; (c) after the commit, sends a `VERIFY_EMAIL`
+  email to the *new* address. A failed send does not fail the request: `200` with a `warnings` entry. The
+  user's current session still carries the old address in its token, so their requests are refused with
+  `403` until the token refreshes (a few minutes) or they sign in again — the cost of using email as the
+  join key.
+- An unchanged email leaves Keycloak's verified flag alone and sends nothing.
+- Audits `USER_UPDATED` with before/after of the four fields.
 
 ### `PATCH /admin/v1/users/:id/status`
 
@@ -217,9 +248,24 @@ have their own endpoints below. `404 USER_NOT_FOUND` if the id is unknown.
 { "status": "INACTIVE" }
 ```
 
-Deactivating disables the Keycloak account and sets local `status = INACTIVE`; `user_roles` rows are
-**kept**, not deleted. Re-activating (`status = ACTIVE`) re-enables the Keycloak account and restores
-access without re-selecting roles (B-34). Audits `USER_DEACTIVATED` / `USER_REACTIVATED`.
+`ACTIVE` or `INACTIVE` only (`LOCKED` does not exist — data-dictionary.md §2.1). **Deactivating** sets
+local `status = INACTIVE`, **disables** the Keycloak account **and ends all its sessions**, so an
+already-issued refresh token stops working at once. `user_roles` rows are **kept**. **Re-activating**
+re-enables the account and restores access without re-selecting roles (B-34). Audits `USER_DEACTIVATED` /
+`USER_REACTIVATED`.
+
+Effect timing: this service refuses the user from the very next request (the local status is checked on
+every call). A token already issued stays valid for other services until it expires (minutes), because
+they only validate the token — ending the Keycloak sessions stops *refresh*, not an unexpired access token.
+
+Asking for the status the user already has is a no-op: `200`, no Keycloak call, no audit row.
+
+| Status | Cause |
+|---|---|
+| `409` | `CANNOT_DEACTIVATE_SELF` — you cannot deactivate your own account |
+| `409` | `LAST_SUPER_ADMIN` — would leave no active `SUPER_ADMIN` |
+| `404` / `400` | unknown user / invalid `status` |
+| `502` | `KEYCLOAK_SYNC_FAILED` — nothing changed |
 
 ### `PUT /admin/v1/users/:id/roles`
 
@@ -227,27 +273,44 @@ access without re-selecting roles (B-34). Audits `USER_DEACTIVATED` / `USER_REAC
 { "roleIds": ["...", "..."] }
 ```
 
-**Full-replacement semantics** — the payload is the complete desired set, not a delta. The service
-diffs it against the current `user_roles` rows and assigns/removes only the realm roles that actually
-changed in Keycloak (B-35) — see
-[flow-diagrams.md](flow-diagrams.md#flow-3--role-assignment-diff). Audits `USER_ROLES_UPDATED` with
-the before/after role id sets.
+**Full-replacement semantics** — the payload is the complete desired set, not a delta (empty = no roles).
+The service diffs it against the current `user_roles` rows and assigns/removes **only the realm roles that
+actually changed** in Keycloak (B-35) — a user with 5 roles who gains a 6th causes exactly one assign call
+and no removes; see [flow-diagrams.md](flow-diagrams.md#flow-3--role-assignment-diff). The same set again
+is a no-op (`200`, no Keycloak call, no audit row). Audits `USER_ROLES_UPDATED` with the before/after role
+*names*.
+
+| Status | Cause |
+|---|---|
+| `400` | unknown `roleId` |
+| `409` | `ROLE_NOT_SYNCED` — a role being **added** is not a Keycloak realm role yet (checked before anything is written); open its Permissions tab and Save or Re-sync first |
+| `409` | `LAST_SUPER_ADMIN` — removing `SUPER_ADMIN` from the only active holder |
+| `502` | `KEYCLOAK_SYNC_FAILED` — local roles unchanged; any Keycloak change already made was reversed |
 
 ### `POST /admin/v1/users/:id/reset-password`
 
-No body. Triggers the same combined `VERIFY_EMAIL` + `UPDATE_PASSWORD` action email `POST /users`
-sends at creation (72-hour link); no password ever passes through this service (B-36). `200` with no
-notable body. Audits `USER_PASSWORD_RESET`.
+No body. Sends the same combined `VERIFY_EMAIL` + `UPDATE_PASSWORD` action email `POST /users` sends at
+creation (72-hour link); no password ever passes through this service (B-36). `200` with `{ "sent": true }`.
+Each call issues a fresh link and invalidates any earlier unused one. Audits `USER_PASSWORD_RESET`, only
+when the email was actually sent.
 
-Serves two distinct purposes with the same call: **resend** (the creation email expired, was lost, or
-failed to send — see the warning case above) and **genuine reset** (a security concern for an
-already-onboarded, active user). Each call generates a fresh action token and invalidates any
-previously issued, unused one.
+Serves two purposes with the same call: **resend** (the creation email expired, was lost, or failed) and
+**genuine reset** (a security concern for an already-onboarded user).
 
-`cce-admin-ui`'s Users list (F-10) surfaces this more prominently — a "needs attention" indicator —
-for any user with `status = ACTIVE` and `last_login_at IS NULL` (never completed onboarding; see
-[data-dictionary.md §1.1](data-dictionary.md#11-users--console-accounts)), distinct from its plain,
-always-available presence on every other row.
+| Status | Cause |
+|---|---|
+| `409` | `USER_NOT_ACTIVE` — an inactive account can't use the link; reactivate first |
+| `502` | `KEYCLOAK_SYNC_FAILED` — unlike creation (where a failed email is a warning), the email *is* the whole operation here |
+| `404` | unknown user |
+
+`cce-admin-ui` surfaces this more prominently — a "needs attention" indicator with a **Resend invite**
+button — for any user with `status = ACTIVE` and `last_login_at IS NULL` (never completed onboarding; see
+[data-dictionary.md §1.1](data-dictionary.md#11-users--console-accounts)); every other user has it on
+their detail page.
+
+**Lockout guards (not in the PRD).** The first admin is created by hand, so the console refuses actions
+that would leave nobody able to administer it: a user cannot deactivate **themselves**, and the **last
+active `SUPER_ADMIN`** cannot be deactivated or have the role removed.
 
 ---
 

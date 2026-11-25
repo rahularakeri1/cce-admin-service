@@ -136,6 +136,79 @@ public class AdminClientKeycloakGateway implements KeycloakGateway {
   }
 
   @Override
+  public String findUserId(String username) {
+    try {
+      List<UserRepresentation> found = realm().users().searchByUsername(username, true);
+      if (found.isEmpty()) {
+        throw new SyncFailedException("User '" + username + "' does not exist in Keycloak");
+      }
+      return found.get(0).getId();
+    } catch (SyncFailedException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw failure("looking the user up", e);
+    }
+  }
+
+  @Override
+  public KeycloakUserProfile updateUser(String keycloakUserId, KeycloakUserProfile profile) {
+    try {
+      var resource = realm().users().get(keycloakUserId);
+      UserRepresentation user = resource.toRepresentation();
+      KeycloakUserProfile before =
+          new KeycloakUserProfile(user.getFirstName(), user.getLastName(), user.getEmail(), user.isEmailVerified());
+      user.setFirstName(profile.firstName());
+      user.setLastName(profile.lastName());
+      user.setEmail(profile.email());
+      if (profile.emailVerified() != null) {
+        user.setEmailVerified(profile.emailVerified());
+      }
+      resource.update(user);
+      return before;
+    } catch (RuntimeException e) {
+      throw failure("updating the user", e);
+    }
+  }
+
+  @Override
+  public void setEnabled(String keycloakUserId, boolean enabled) {
+    try {
+      var resource = realm().users().get(keycloakUserId);
+      UserRepresentation user = resource.toRepresentation();
+      user.setEnabled(enabled);
+      resource.update(user);
+    } catch (RuntimeException e) {
+      throw failure(enabled ? "enabling the user" : "disabling the user", e);
+    }
+  }
+
+  @Override
+  public void removeRealmRoles(String keycloakUserId, Collection<String> roleNames) {
+    if (roleNames.isEmpty()) {
+      return;
+    }
+    try {
+      RealmResource realm = realm();
+      List<RoleRepresentation> roles = new ArrayList<>();
+      for (String name : roleNames) {
+        roles.add(realm.roles().get(name).toRepresentation());
+      }
+      realm.users().get(keycloakUserId).roles().realmLevel().remove(roles);
+    } catch (RuntimeException e) {
+      throw failure("removing realm roles", e);
+    }
+  }
+
+  @Override
+  public void logoutUser(String keycloakUserId) {
+    try {
+      realm().users().get(keycloakUserId).logout();
+    } catch (RuntimeException e) {
+      throw failure("ending the user's sessions", e);
+    }
+  }
+
+  @Override
   public void sendActionsEmail(String keycloakUserId, List<String> actions, long lifespanSeconds) {
     try {
       var user = realm().users().get(keycloakUserId);

@@ -203,6 +203,11 @@ mutation:
   transaction *before* the main transaction is rolled back, with `entity_id` set to the Keycloak
   account's own id. There is no UI for reconciliation in this release — an operator reads
   `admin_audit_log` directly.
+- **User edits, status changes and role changes (Milestone 6)** use the same local-first shape as creation, plus
+  a **reversal** step: each Keycloak change is paired with the call that undoes it (`KeycloakChangeSet`).
+  A failing call reverses the ones already applied, then the local transaction rolls back; a failing
+  *commit* reverses Keycloak too. Only if a reversal itself fails is a `USER_SYNC_FAILED` row written
+  (own transaction) because Keycloak and the database may now disagree.
 - A role's realm role must exist in Keycloak (i.e. a successful sync) **before** it can be assigned
   to any user — not because `gateway-service`'s enforcement would otherwise be stale (its permission
   cache reloads as an unconditional first step of the sync call, even if the sync's second step then

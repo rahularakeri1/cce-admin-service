@@ -76,6 +76,12 @@ public class UserQueryService {
     return new Result(users, new PageMeta(pageNo, size, result.getTotalElements()));
   }
 
+  @Transactional(readOnly = true)
+  public UserResponse get(UUID id) {
+    User user = userRepository.findById(id).orElseThrow(() -> org.openphc.cce.admin.exception.NotFoundException.user(id));
+    return UserResponse.from(user, rolesFor(List.of(id)).getOrDefault(id, List.of()));
+  }
+
   private Map<UUID, List<String>> rolesFor(List<UUID> userIds) {
     if (userIds.isEmpty()) {
       return Map.of();

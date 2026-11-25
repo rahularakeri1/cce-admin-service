@@ -263,7 +263,7 @@ resolve to a row in this schema, by design.
 | Value | Description |
 |---|---|
 | `ACTIVE` | Normal state. Keycloak account enabled |
-| `INACTIVE` | Deactivated — terminal for this release, no hard delete. Keycloak account disabled. `user_roles` retained for re-activation |
+| `INACTIVE` | Deactivated — "terminal" in the PRD means there is **no hard delete**, not that it can't be undone: `PATCH /users/:id/status` back to `ACTIVE` re-enables the account (B-34). Keycloak account disabled. `user_roles` retained for re-activation |
 
 > **Simplified from the PRD.** Appendix B also lists a `LOCKED` value (as a `403 FORBIDDEN` cause), but
 > no requirement describes what sets or clears it — `PATCH /users/:id/status` (B-34) only documents
@@ -285,7 +285,8 @@ exhaustive — any future mutating endpoint needs its own value here.
 | `USER_DEACTIVATED` | `PATCH /users/:id/status` → `INACTIVE` (B-34) |
 | `USER_REACTIVATED` | `PATCH /users/:id/status` → `ACTIVE` (B-34) |
 | `USER_ROLES_UPDATED` | `PUT /users/:id/roles` (B-35) |
-| `USER_PASSWORD_RESET` | `POST /users/:id/reset-password` (B-36) |
+| `USER_PASSWORD_RESET` | `POST /users/:id/reset-password` (B-36) — `after` = `{email}`; written only when the email was actually sent |
+| `USER_SYNC_FAILED` | `PUT /users/:id`, `PATCH /users/:id/status`, `PUT /users/:id/roles` — when a Keycloak change had to be reversed and **the reversal itself failed** (or the local commit failed and Keycloak could not be put back), so Keycloak and the database may now disagree for that user. Own transaction, `entity_id` = the local `users.id`, `after` = `{operation, username, reason, note}`. A clean failure (reversal succeeded) writes nothing |
 | `ROLE_CREATED` | `POST /roles` |
 | `ROLE_UPDATED` | `PUT /roles/:id` |
 | `ROLE_DELETED` | `DELETE /roles/:id` |
