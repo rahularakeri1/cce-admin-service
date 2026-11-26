@@ -172,6 +172,20 @@ Build it once (`cd ../gateway-service && ./gradlew bootJar`), then:
 scripts/run-gateway-local.sh      # foreground, :8090, against local ccedb + Keycloak realm `cce`
 ```
 
+The script also routes `/v1/protocol/**` to the protocol service (Milestone 8), so the Protocols page works
+through the gateway as it does in a real environment. Run `cce-protocol-service` on **8091** (8090 is the
+gateway), against the same `ccedb`:
+
+```bash
+cd ../cce-protocol-service && SERVER_PORT=8091 ./gradlew bootRun
+```
+
+`PROTOCOL_SERVICE_URI` overrides where the route points. After V5 has run (start this service once), **run the
+gateway sync** — save any role's Permissions tab, or `POST /api/permissions/sync-to-keycloak` — so the gateway
+reloads its rules and `SUPER_ADMIN` can use the protocol calls. Testing upload: `emr-service-protocol.json` is
+usually already loaded locally, so upload a **copy with a different `version`** (and only retire that copy:
+retiring the real one stops it matching events).
+
 `GATEWAY_URL` (default `http://localhost:8090`) tells this service where to find it. The **first sync
 creates every distinct `api_permissions.permission_name` as a realm role** in the local realm
 (`COMPLIANCE_READ`, `INSIGHTS_READ`, …) and deletes realm roles that have no rows — expected, but

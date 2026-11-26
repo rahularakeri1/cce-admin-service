@@ -544,9 +544,7 @@ The service refuses what a role may not do, independent of the gateway, using th
 
 ---
 
-## Protocols (planned — Milestone 8)
-
-> **Planned — Milestone 8. Not implemented yet;** this is the agreed design, written first (docs-first).
+## Protocols (Milestone 8)
 
 **This service has no protocol endpoints.** `cce-admin-ui`'s Protocols tab calls `cce-protocol-service`'s own
 API **through the gateway** with the user's token:
@@ -566,5 +564,24 @@ A role may use them only if it has the **Protocols** menu **and** gateway permis
 role's Permissions tab: `GET /admin/v1/me`, `GET /admin/v1/me/menus`, and `GET` and `POST
 /v1/protocol/protocol-definitions/**` — see
 [architecture-overview.md §9.9](architecture-overview.md#99-milestones-78--role-aware-console-and-protocol-management).
+
+**What comes back** (checked live through the gateway; the UI decides by HTTP status first):
+
+| Call | Success | Failure |
+|---|---|---|
+| list | `200`, a Spring `Page`: `content[]`, `totalElements`, `totalPages`, `number`, `size`, `first`, `last` | — |
+| detail | `200`, `{ id, url, version, canonical, status, loadedAt, definition }` (`status` `ACTIVE` / `RETIRED`) | `404` unknown id |
+| upload | `201`, the new definition (`ACTIVE`) | `400` the same `(url, version)` exists — message `Protocol definition already exists for url=…, version=…` (**400, not 409**); `400` blank body; `422` not FHIR JSON / failed protocol validation |
+| retire | `200`, the definition now `RETIRED` | `409` already retired; `404` unknown id |
+
+Errors from the protocol service look like `{ status, error, message, timestamp }`. Two other answers come from
+the **gateway**, not the protocol service, and have a different body: **`403`** `{ error, message: "Access
+denied: Insufficient permissions", status }` when the role has no matching row, and **`500`** with no
+`message` (only `timestamp, path, status, error, requestId`) when the protocol service is **down** — the gateway
+does not translate that to 502/503. A request with no token is also a gateway `500` ("Invalid Authorization
+header"). So the UI treats any `5xx` or a network failure as "protocol service unavailable".
+
+Retiring sets the status to `RETIRED` **and deletes the protocol's trigger-index entries**, so it stops matching
+new events; existing enrollments are untouched. There is no un-retire in this release (open question Q6).
 
 Who uploaded or retired what is **not recorded** in this release (open question Q1, §9.10).

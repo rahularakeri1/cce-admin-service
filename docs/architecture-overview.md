@@ -332,8 +332,7 @@ more. *Which role may call which endpoint* is enforced by `gateway-service` agai
 - Behind the gateway in a real environment, a caller without the `SUPER_ADMIN` realm role is stopped
   before reaching this service.
 - A service-level `SUPER_ADMIN` check would be defence in depth, but it is not specified by the PRD
-  and would make this service a second source of truth for permissions. Revisit in Milestone 8
-  (End-to-End), which runs the whole chain through the real gateway.
+  and would make this service a second source of truth for permissions. Superseded by Milestone 7.
 
 ### 9.7 gateway-service's sync endpoint is unauthenticated — verified, not assumed
 
@@ -374,8 +373,8 @@ wires the local realm to a Mailpit container (web UI `http://localhost:8025`) fo
 
 ### 9.9 Milestones 7–8 — role-aware console and protocol management
 
-> **Milestone 7 (decisions 4–7: console menus, service authorization, tab rules, startup check) is built.**
-> **Milestone 8 (decisions 1–3, protocols) is planned and not implemented yet** — the agreed design, written first (docs-first).
+> **Milestone 7 (decisions 4–7: console menus, service authorization, tab rules, startup check) and Milestone 8
+> (decisions 1–3: the Protocols page and its gateway rows) are built.**
 
 **Why.** Protocol definitions are loaded today with `curl` against `cce-protocol-service`; there is no
 screen and no restriction beyond the gateway. Loading or retiring one changes clinical matching, so it

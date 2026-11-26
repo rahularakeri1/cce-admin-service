@@ -20,6 +20,15 @@ In every non-local environment, both apps reach `cce-admin-service` only through
 the service itself is not internet-facing (PRD §9 Non-functional — Network). Do not expose port
 `8085` directly outside the cluster/VM network `gateway-service` also sits on.
 
+## Protocol management (Milestone 8)
+
+The Protocols page calls `cce-protocol-service` through the gateway, so a deployment needs: (1) a gateway route
+for `/v1/protocol/**` to the protocol service with the JWT filter (the local script adds it; check the real
+environment has it); (2) the gateway sync run after V5, so `SUPER_ADMIN`'s protocol rows are loaded; (3) the
+admin UI's origin in the gateway's `ALLOWED_ORIGINS` (CORS) if the UI and gateway are on different origins.
+`cce-protocol-service` itself is unchanged and, like every service behind the gateway, does not check tokens —
+keep it unreachable except through the gateway (open question Q2).
+
 ## Config parity with gateway-service
 
 `JWT_ISSUER`, `JWT_AUDIENCE`, `JWT_ROLES_CLAIM_PATH` must match `gateway-service`'s configuration for
