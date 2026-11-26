@@ -180,7 +180,10 @@ gateway), against the same `ccedb`:
 cd ../cce-protocol-service && SERVER_PORT=8091 ./gradlew bootRun
 ```
 
-`PROTOCOL_SERVICE_URI` overrides where the route points. After V5 has run (start this service once), **run the
+`PROTOCOL_SERVICE_URI` overrides where the route points. The script also sets the gateway's `ALLOWED_ORIGINS` to
+`http://localhost:3000,http://localhost:3002` (override with the env var): a browser sends `Origin` on every `POST`,
+and without the admin UI's `:3002` in that list upload and retire fail with an empty `403` while list and detail
+still work. After V5 has run (start this service once), **run the
 gateway sync** — save any role's Permissions tab, or `POST /api/permissions/sync-to-keycloak` — so the gateway
 reloads its rules and `SUPER_ADMIN` can use the protocol calls. Testing upload: `emr-service-protocol.json` is
 usually already loaded locally, so upload a **copy with a different `version`** (and only retire that copy:

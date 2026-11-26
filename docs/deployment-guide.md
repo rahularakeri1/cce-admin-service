@@ -25,7 +25,13 @@ the service itself is not internet-facing (PRD §9 Non-functional — Network). 
 The Protocols page calls `cce-protocol-service` through the gateway, so a deployment needs: (1) a gateway route
 for `/v1/protocol/**` to the protocol service with the JWT filter (the local script adds it; check the real
 environment has it); (2) the gateway sync run after V5, so `SUPER_ADMIN`'s protocol rows are loaded; (3) the
-admin UI's origin in the gateway's `ALLOWED_ORIGINS` (CORS) if the UI and gateway are on different origins.
+admin UI's origin in the gateway's `ALLOWED_ORIGINS` (CORS). This is **required, not optional**, and it also applies
+behind a same-origin proxy such as the Vite dev server: a browser sends an `Origin` header on every `POST`, and
+the gateway refuses an origin that isn't listed with an **empty `403` before any permission check**. The trap is that
+`GET`s keep working (browsers omit `Origin` on same-origin `GET`s), so the Protocols list and detail open fine while
+upload and retire fail — and a `curl` without `Origin` works too. Check with
+`curl -i -X POST -H "Origin: <the UI's origin>" -H "Authorization: Bearer <token>" <gateway>/v1/protocol/protocol-definitions`:
+an empty `403` means the origin is missing.
 `cce-protocol-service` itself is unchanged and, like every service behind the gateway, does not check tokens —
 keep it unreachable except through the gateway (open question Q2).
 

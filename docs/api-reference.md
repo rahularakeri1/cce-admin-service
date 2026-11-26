@@ -576,7 +576,9 @@ role's Permissions tab: `GET /admin/v1/me`, `GET /admin/v1/me/menus`, and `GET` 
 
 Errors from the protocol service look like `{ status, error, message, timestamp }`. Two other answers come from
 the **gateway**, not the protocol service, and have a different body: **`403`** `{ error, message: "Access
-denied: Insufficient permissions", status }` when the role has no matching row, and **`500`** with no
+denied: Insufficient permissions", status }` when the role has no matching row (and an **empty `403`** when the
+caller's browser `Origin` is not in the gateway's `ALLOWED_ORIGINS` — refused by CORS before any permission check;
+see [deployment-guide.md](deployment-guide.md#protocol-management-milestone-8)), and **`500`** with no
 `message` (only `timestamp, path, status, error, requestId`) when the protocol service is **down** — the gateway
 does not translate that to 502/503. A request with no token is also a gateway `500` ("Invalid Authorization
 header"). So the UI treats any `5xx` or a network failure as "protocol service unavailable".
