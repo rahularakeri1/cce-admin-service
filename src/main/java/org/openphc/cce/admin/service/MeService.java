@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.UUID;
 import org.openphc.cce.admin.dto.MeResponse;
 import org.openphc.cce.admin.dto.MenuItemResponse;
+import org.openphc.cce.admin.entity.Menu;
 import org.openphc.cce.admin.entity.Role;
 import org.openphc.cce.admin.entity.User;
 import org.openphc.cce.admin.entity.UserRole;
@@ -54,10 +55,14 @@ public class MeService {
     return new MeResponse(user.getId(), user.getUsername(), roleNames(user.getId()), user.getFacilityScope());
   }
 
+  /** The caller's menus for one console ({@link Menu#CONSOLE_INSIGHTS} or {@link Menu#CONSOLE_ADMIN}). */
   @Transactional(readOnly = true)
-  public List<MenuItemResponse> menus(CurrentUser current) {
+  public List<MenuItemResponse> menus(CurrentUser current, String console) {
     List<UUID> roleIds = roleIds(current.id());
-    return menuUnionService.menusForRoles(roleIds).stream().map(MenuItemResponse::from).toList();
+    return menuUnionService.menusForRoles(roleIds).stream()
+        .filter(menu -> console.equals(menu.getConsole()))
+        .map(MenuItemResponse::from)
+        .toList();
   }
 
   /**

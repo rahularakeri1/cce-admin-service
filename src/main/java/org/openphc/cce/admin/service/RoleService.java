@@ -37,6 +37,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class RoleService {
 
   private static final String ENTITY_TYPE = "ROLE";
+  private static final String SUPER_ADMIN = "SUPER_ADMIN";
+
+  /** The four admin console tabs seeded by V4; SUPER_ADMIN must hold all of them. */
+  static final Set<String> ADMIN_TABS = Set.of("admin-users", "admin-roles", "admin-menus", "admin-protocols");
+
+  /** The tabs only SUPER_ADMIN may hold. Protocols is deliberately assignable to other roles. */
+  static final Set<String> SUPER_ADMIN_ONLY_TABS = Set.of("admin-users", "admin-roles", "admin-menus");
 
   private final RoleRepository roleRepository;
   private final UserRoleRepository userRoleRepository;
@@ -154,7 +161,7 @@ public class RoleService {
    */
   @Transactional
   public RoleMenusResponse replaceMenus(UUID roleId, Collection<UUID> requested, UUID actorId, String ip) {
-    find(roleId);
+    Role role = find(roleId);
     Set<UUID> wanted = new LinkedHashSet<>(requested);
     Map<UUID, Menu> known =
         menuRepository.findAllById(wanted).stream().collect(Collectors.toMap(Menu::getId, m -> m));
@@ -163,6 +170,8 @@ public class RoleService {
         throw NotFoundException.menu(menuId);
       }
     }
+
+    enforceAdminTabRules(role, wanted, known);
 
     List<UUID> before = currentMenuIds(roleId);
     Set<UUID> existing = new LinkedHashSet<>(before);
@@ -182,6 +191,34 @@ public class RoleService {
     auditLogWriter.write(
         actorId, AuditAction.ROLE_MENUS_UPDATED, ENTITY_TYPE, roleId.toString(), beforePayload, afterPayload, ip);
     return new RoleMenusResponse(after);
+  }
+
+  /**
+   * The admin console's own tabs are menu entries, so the menus screen could lock people out of it:
+   * SUPER_ADMIN must keep all four, and the three management tabs (Users, Roles, Menus) belong to
+   * SUPER_ADMIN alone — the service refuses those endpoints to any other role anyway (docs/api-reference.md).
+   */
+  private void enforceAdminTabRules(Role role, Set<UUID> wanted, Map<UUID, Menu> requested) {
+    if (SUPER_ADMIN.equals(role.getName())) {
+      List<String> missing =
+          menuRepository.findAllByConsoleOrderBySortOrderAsc(Menu.CONSOLE_ADMIN).stream()
+              .filter(m -> ADMIN_TABS.contains(m.getMenuKey()) && !wanted.contains(m.getId()))
+              .map(Menu::getLabel)
+              .toList();
+      if (!missing.isEmpty()) {
+        throw ConflictException.adminMenuRequired(missing);
+      }
+      return;
+    }
+    List<String> forbidden =
+        requested.values().stream()
+            .filter(m -> SUPER_ADMIN_ONLY_TABS.contains(m.getMenuKey()))
+            .map(Menu::getLabel)
+            .sorted()
+            .toList();
+    if (!forbidden.isEmpty()) {
+      throw ConflictException.adminMenuSuperAdminOnly(forbidden, role.getName());
+    }
   }
 
   private List<UUID> currentMenuIds(UUID roleId) {

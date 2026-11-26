@@ -1,12 +1,10 @@
 package org.openphc.cce.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +20,7 @@ import org.openphc.cce.admin.entity.UserStatus;
 import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.repository.UserRoleRepository;
+import org.openphc.cce.admin.testsupport.TestAccounts;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -53,8 +52,8 @@ class UserListIntegrationTest {
   @BeforeEach
   void setUp() {
     tag = "TAG" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
-    actor = save("list-actor-" + UUID.randomUUID(), UserStatus.ACTIVE, "Actor", "Person", null);
-    userRoleRepository.save(new UserRole(actor.getId(), roleRepository.findByName("SUPER_ADMIN").orElseThrow().getId()));
+    actor = new TestAccounts(userRepository, roleRepository, userRoleRepository).superAdmin("list-actor");
+    userIds.add(actor.getId());
     roleA = newRole("TEST_LIST_A_");
     roleB = newRole("TEST_LIST_B_");
   }
@@ -96,7 +95,7 @@ class UserListIntegrationTest {
   }
 
   private JwtRequestPostProcessor token() {
-    return jwt().jwt(b -> b.claim("email", actor.getEmail()).claim("auth_time", Instant.now().getEpochSecond()));
+    return TestAccounts.tokenFor(actor);
   }
 
   private ResultActions list(String query) throws Exception {

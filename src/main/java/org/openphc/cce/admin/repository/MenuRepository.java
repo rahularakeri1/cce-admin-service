@@ -9,5 +9,7 @@ public interface MenuRepository extends JpaRepository<Menu, UUID> {
 
   List<Menu> findAllByOrderBySortOrderAsc();
 
+  List<Menu> findAllByConsoleOrderBySortOrderAsc(String console);
+
   boolean existsByMenuKey(String menuKey);
 }

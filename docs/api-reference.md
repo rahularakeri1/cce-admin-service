@@ -77,8 +77,7 @@ fall back to `now()` at write time if it's ever absent, rather than skipping the
 
 ### `GET /me/menus`
 
-> **Planned — Milestone 7. Not implemented yet;** this is the agreed design, written first (docs-first).
-> Will accept `?console=INSIGHTS|ADMIN` (default `INSIGHTS`, so current callers are unchanged). `cce-admin-ui` will call it with `console=ADMIN` to build its own sidebar — see [architecture-overview.md §9.9](architecture-overview.md#99-planned-milestones-78--role-aware-console-and-protocol-management).
+> **Milestone 7.** Accepts `?console=INSIGHTS|ADMIN` (default `INSIGHTS`, so callers that predate the parameter are unchanged; any other value is `400 VALIDATION_ERROR`). `cce-admin-ui` calls it with `console=ADMIN` to build its own sidebar — see [architecture-overview.md §9.9](architecture-overview.md#99-milestones-78--role-aware-console-and-protocol-management). `?console=ADMIN` returns the caller's own admin tabs (Users, Roles, Menus, Protocols — whichever their roles carry); a role without them gets `[]`. Read from the database on every call, so a role or tab change shows on the next request without a token refresh.
 
 A flat list of menus for every role the caller holds — a **union** across roles, not per-role. Only
 `is_active` menus are included, ordered by `sort_order` (B-21).
@@ -401,14 +400,17 @@ Full-replacement semantics — the payload is always the complete desired set; a
 role's menus. Duplicate ids in the payload are collapsed. Saving the same set twice succeeds and
 still writes an audit row. If **any** id is not a known menu, the whole request is rejected with
 `404 MENU_NOT_FOUND` and the existing set is left untouched. Allowed on system roles too (editing
-`SUPER_ADMIN`'s menus cannot lock anyone out of this console, whose own sidebar is static).
+the admin console's own tabs are menu entries since Milestone 7, so two rules apply — both `409`, both
+checked before anything is saved or audited:
 
-> **Planned change — Milestone 7:** once the admin sidebar is built from menus, that reasoning no longer holds, so
-> (a) `SUPER_ADMIN`'s four admin entries (Users, Roles, Menus, Protocols) can **not** be removed — a request that
-> omits them is `409`; and (b) the **Users, Roles and Menus** admin entries can only be assigned to
-> `SUPER_ADMIN` — assigning one to any other role is `409`. The Protocols and insights entries stay assignable to
-> any role. The UI greys out what the server would refuse. Audits
-`ROLE_MENUS_UPDATED` (before/after menu ids).
+| Rule | Code |
+|---|---|
+| `SUPER_ADMIN`'s four admin entries (Users, Roles, Menus, Protocols) cannot be removed — a request that omits any of them is refused, so nobody can lock themselves out | `ADMIN_MENU_REQUIRED` |
+| The **Users, Roles and Menus** admin entries can only be assigned to `SUPER_ADMIN` — assigning one to any other role is refused, because every call behind them is `SUPER_ADMIN`-only | `ADMIN_MENU_SUPER_ADMIN_ONLY` |
+
+The Protocols entry and the insights entries stay assignable to any role (insights entries stay editable on
+`SUPER_ADMIN` too). The UI greys out what the server would refuse. Audits `ROLE_MENUS_UPDATED` (before/after
+menu ids).
 
 ```json
 { "data": { "menuIds": [...] } }
@@ -486,11 +488,12 @@ API does not expose one: `syncStatus` appears only on a response that follows a 
 | `DELETE` | `/:id` | Delete |
 
 `GET` returns the complete catalog (not filtered by caller's roles — that's `GET /me/menus`), ordered
-by `sort_order` then `label`, **including inactive menus**. Flat list — no nesting. Each entry:
-`{ id, menuKey, label, path, icon, sortOrder, isActive }`.
+insights menus first, then the admin console's tabs (each by `sort_order`, then `label`), **including inactive menus**.
+Flat list — no nesting. Each entry: `{ id, menuKey, label, path, icon, console, sortOrder, isActive }`, where
+`console` is `INSIGHTS` or `ADMIN`.
 
 > **Milestone note:** only `GET` exists so far (Milestone 3 — the Role Detail → Menus tab needs the
-> catalog). `POST` / `PUT` / `DELETE` below arrive with Milestone 7.
+> catalog). `POST` / `PUT` / `DELETE` below arrive with Milestone 9 (Menus Catalog), which must also protect the four `ADMIN` entries.
 
 `POST` / `PUT`:
 ```json
@@ -528,12 +531,10 @@ the controller annotations, not a gap in this document.
 
 ---
 
-## Authorization (planned — Milestone 7)
-
-> **Planned — Milestone 7. Not implemented yet;** this is the agreed design, written first (docs-first).
+## Authorization (Milestone 7)
 
 The service refuses what a role may not do, independent of the gateway, using the user's **database roles**
-(not the token's role claim — see [architecture-overview.md §9.9](architecture-overview.md#99-planned-milestones-78--role-aware-console-and-protocol-management)):
+(read from `user_roles` on every request, not the token's role claim — see [architecture-overview.md §9.9](architecture-overview.md#99-milestones-78--role-aware-console-and-protocol-management)):
 
 | Endpoints | Required | Otherwise |
 |---|---|---|
@@ -564,6 +565,6 @@ A role may use them only if it has the **Protocols** menu **and** gateway permis
 `SUPER_ADMIN` gets both from migrations (V4 and V5). For any other role a `SUPER_ADMIN` adds four rows on the
 role's Permissions tab: `GET /admin/v1/me`, `GET /admin/v1/me/menus`, and `GET` and `POST
 /v1/protocol/protocol-definitions/**` — see
-[architecture-overview.md §9.9](architecture-overview.md#99-planned-milestones-78--role-aware-console-and-protocol-management).
+[architecture-overview.md §9.9](architecture-overview.md#99-milestones-78--role-aware-console-and-protocol-management).
 
 Who uploaded or retired what is **not recorded** in this release (open question Q1, §9.10).

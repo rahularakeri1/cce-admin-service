@@ -321,7 +321,7 @@ they came up during this review:
 
 ### 9.6 Authorization is enforced at the gateway, not in this service
 
-> **Superseded by Milestone 7 (planned)** — the service will enforce roles itself; see [§9.9](#99-planned-milestones-78--role-aware-console-and-protocol-management). Until then, what follows is the current behaviour.
+> **Superseded by Milestone 7 (built)** — the service now enforces roles itself (everything but `/me`, `/me/menus` and health needs `SUPER_ADMIN`, on the database roles); see [§9.9](#99-milestones-78--role-aware-console-and-protocol-management). What follows describes the behaviour **before** Milestone 7 and is kept for the reasoning; the gateway rows are still the first layer.
 
 Every `/admin/v1/**` endpoint in this service requires a valid JWT and a local `ACTIVE` user — nothing
 more. *Which role may call which endpoint* is enforced by `gateway-service` against `api_permissions`
@@ -366,15 +366,16 @@ The invitation email is sent by **Keycloak**, not this service, so the realm nee
 without it fails every send; creation still succeeds with a `warnings` entry. `scripts/setup-local-mail.sh`
 wires the local realm to a Mailpit container (web UI `http://localhost:8025`) for development.
 
-> **Planned — Milestone 7:** in the `prod` Spring profile the service **refuses to start** unless
+> **Milestone 7:** in the `prod` Spring profile the service **refuses to start** unless
 > `KEYCLOAK_ADMIN_CLIENT_SECRET` is set — the password fallback is not allowed there, so it can never
 > silently run on the default `admin`/`admin`. Local development (no `prod` profile) is unchanged. Production
 > prerequisite: a service-account client in the production `cce` realm with the user and role management
 > rights it needs (a Keycloak admin task). The production realm already has SMTP (see §9.10).
 
-### 9.9 Planned (Milestones 7–8) — role-aware console and protocol management
+### 9.9 Milestones 7–8 — role-aware console and protocol management
 
-> **Planned — Milestone 7. Not implemented yet;** this is the agreed design, written first (docs-first).
+> **Milestone 7 (decisions 4–7: console menus, service authorization, tab rules, startup check) is built.**
+> **Milestone 8 (decisions 1–3, protocols) is planned and not implemented yet** — the agreed design, written first (docs-first).
 
 **Why.** Protocol definitions are loaded today with `curl` against `cce-protocol-service`; there is no
 screen and no restriction beyond the gateway. Loading or retiring one changes clinical matching, so it

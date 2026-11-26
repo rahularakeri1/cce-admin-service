@@ -3,7 +3,6 @@ package org.openphc.cce.admin;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -12,7 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -31,6 +29,7 @@ import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.repository.UserRoleRepository;
+import org.openphc.cce.admin.testsupport.TestAccounts;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -62,9 +61,7 @@ class RoleEndpointIntegrationTest {
 
   @BeforeEach
   void createActor() {
-    actor = newUser();
-    Role superAdmin = roleRepository.findByName("SUPER_ADMIN").orElseThrow();
-    userRoleRepository.save(new UserRole(actor.getId(), superAdmin.getId()));
+    actor = accounts().superAdmin("role-test-actor");
   }
 
   @AfterEach
@@ -86,8 +83,12 @@ class RoleEndpointIntegrationTest {
     return userRepository.save(u);
   }
 
+  private TestAccounts accounts() {
+    return new TestAccounts(userRepository, roleRepository, userRoleRepository);
+  }
+
   private JwtRequestPostProcessor token() {
-    return jwt().jwt(b -> b.claim("email", actor.getEmail()).claim("auth_time", Instant.now().getEpochSecond()));
+    return TestAccounts.tokenFor(actor);
   }
 
   private String uniqueName() {
@@ -112,11 +113,20 @@ class RoleEndpointIntegrationTest {
     return id;
   }
 
+  /** The first {@code count} seeded INSIGHTS menus: the ones any role may hold. */
   private List<UUID> seededMenuIds(int count) {
-    return menuRepository.findAll(org.springframework.data.domain.Sort.by("sortOrder")).stream()
+    return menuRepository.findAllByConsoleOrderBySortOrderAsc(Menu.CONSOLE_INSIGHTS).stream()
         .limit(count)
         .map(Menu::getId)
         .toList();
+  }
+
+  private UUID adminMenuId(String menuKey) {
+    return menuRepository.findAll().stream().filter(m -> m.getMenuKey().equals(menuKey)).findFirst().orElseThrow().getId();
+  }
+
+  private UUID superAdminId() {
+    return roleRepository.findByName("SUPER_ADMIN").orElseThrow().getId();
   }
 
   private String menusBody(List<UUID> ids) {
@@ -400,15 +410,81 @@ class RoleEndpointIntegrationTest {
   }
 
   @Test
-  void menuCatalogListsAllSevenSeededMenusInOrderWithTheirKeys() throws Exception {
+  void menuCatalogListsTheSevenInsightsMenusThenTheFourAdminTabsWithTheirConsole() throws Exception {
     mockMvc
         .perform(get("/admin/v1/menus").with(token()))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(7))
+        .andExpect(jsonPath("$.data.length()").value(11))
         .andExpect(jsonPath("$.data[0].menuKey").value("dashboard"))
+        .andExpect(jsonPath("$.data[0].console").value("INSIGHTS"))
         .andExpect(jsonPath("$.data[0].isActive").value(true))
         .andExpect(jsonPath("$.data[6].menuKey").value("ingestion"))
+        .andExpect(jsonPath("$.data[7].menuKey").value("admin-users"))
+        .andExpect(jsonPath("$.data[7].console").value("ADMIN"))
+        .andExpect(jsonPath("$.data[10].menuKey").value("admin-protocols"))
         .andExpect(jsonPath("$.data[*].menuKey").value(not(hasItem("nope"))));
+  }
+
+  // ---- admin tab rules (Milestone 7) ------------------------------------------------------------
+
+  private org.springframework.test.web.servlet.ResultActions putMenus(UUID roleId, List<UUID> menuIds) throws Exception {
+    return mockMvc.perform(
+        put("/admin/v1/roles/" + roleId + "/menus")
+            .with(token())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(menusBody(menuIds)));
+  }
+
+  @Test
+  void aCustomRoleMayHoldTheProtocolsTabAlongsideInsightsMenus() throws Exception {
+    UUID id = createRole(uniqueName());
+    List<UUID> wanted = new ArrayList<>(seededMenuIds(2));
+    wanted.add(adminMenuId("admin-protocols"));
+
+    putMenus(id, wanted).andExpect(status().isOk()).andExpect(jsonPath("$.data.menuIds.length()").value(3));
+  }
+
+  @Test
+  void usersRolesAndMenusTabsCannotBeAssignedToACustomRole() throws Exception {
+    UUID id = createRole(uniqueName());
+    for (String key : List.of("admin-users", "admin-roles", "admin-menus")) {
+      putMenus(id, List.of(adminMenuId(key)))
+          .andExpect(status().isConflict())
+          .andExpect(jsonPath("$.error.code").value("ADMIN_MENU_SUPER_ADMIN_ONLY"));
+    }
+    // Rejected, so nothing was saved and nothing audited as a menu change.
+    mockMvc.perform(get("/admin/v1/roles/" + id + "/menus").with(token())).andExpect(jsonPath("$.data.menuIds.length()").value(0));
+    assertThat(auditActions()).doesNotContain("ROLE_MENUS_UPDATED");
+  }
+
+  @Test
+  void superAdminCannotLoseAnyOfItsFourAdminTabs() throws Exception {
+    List<UUID> current =
+        menuRepository.findAll().stream()
+            .filter(m -> roleMenuRepository.findAllByRoleId(superAdminId()).stream().anyMatch(rm -> rm.getMenuId().equals(m.getId())))
+            .map(Menu::getId)
+            .toList();
+    List<UUID> withoutProtocols = current.stream().filter(i -> !i.equals(adminMenuId("admin-protocols"))).toList();
+
+    putMenus(superAdminId(), withoutProtocols)
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error.code").value("ADMIN_MENU_REQUIRED"));
+    putMenus(superAdminId(), List.of()).andExpect(status().isConflict());
+    assertThat(roleMenuRepository.findAllByRoleId(superAdminId())).hasSameSizeAs(current);
+  }
+
+  @Test
+  void superAdminKeepsItsAdminTabsWhenInsightsMenusChange() throws Exception {
+    List<UUID> admin = menuRepository.findAllByConsoleOrderBySortOrderAsc(Menu.CONSOLE_ADMIN).stream().map(Menu::getId).toList();
+    List<UUID> before =
+        roleMenuRepository.findAllByRoleId(superAdminId()).stream().map(rm -> rm.getMenuId()).toList();
+    try {
+      List<UUID> reduced = new ArrayList<>(admin);
+      reduced.addAll(seededMenuIds(2));
+      putMenus(superAdminId(), reduced).andExpect(status().isOk()).andExpect(jsonPath("$.data.menuIds.length()").value(6));
+    } finally {
+      putMenus(superAdminId(), before).andExpect(status().isOk()); // the seeded SUPER_ADMIN is shared state
+    }
   }
 
   @Test

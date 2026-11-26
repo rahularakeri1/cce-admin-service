@@ -70,6 +70,18 @@ public class ConflictException extends ApiException {
             + "; removing all its permissions would delete it from Keycloak. Reassign them first.");
   }
 
+  public static ConflictException adminMenuRequired(java.util.List<String> labels) {
+    return new ConflictException(
+        "ADMIN_MENU_REQUIRED",
+        "SUPER_ADMIN must keep every admin console tab; missing: " + String.join(", ", labels));
+  }
+
+  public static ConflictException adminMenuSuperAdminOnly(java.util.List<String> labels, String roleName) {
+    return new ConflictException(
+        "ADMIN_MENU_SUPER_ADMIN_ONLY",
+        String.join(", ", labels) + " can only be assigned to SUPER_ADMIN, not to " + roleName);
+  }
+
   public static ConflictException systemRoleImmutable(String name) {
     return new ConflictException("SYSTEM_ROLE_IMMUTABLE", "System role cannot be modified or deleted: " + name);
   }

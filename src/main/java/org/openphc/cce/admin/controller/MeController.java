@@ -5,12 +5,15 @@ import java.util.List;
 import org.openphc.cce.admin.dto.ApiResponse;
 import org.openphc.cce.admin.dto.MeResponse;
 import org.openphc.cce.admin.dto.MenuItemResponse;
+import org.openphc.cce.admin.entity.Menu;
+import org.openphc.cce.admin.exception.ValidationException;
 import org.openphc.cce.admin.security.CurrentUserProvider;
 import org.openphc.cce.admin.service.MeService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** The caller's own profile and menus, resolved from the JWT (docs/api-reference.md → Current user). */
@@ -31,9 +34,13 @@ public class MeController {
     return ApiResponse.of(meService.profile(currentUserProvider.get(), authTime(jwt)));
   }
 
+  /** {@code ?console=INSIGHTS|ADMIN}, default INSIGHTS so callers that predate the parameter are unchanged. */
   @GetMapping("/menus")
-  public ApiResponse<List<MenuItemResponse>> menus() {
-    return ApiResponse.of(meService.menus(currentUserProvider.get()));
+  public ApiResponse<List<MenuItemResponse>> menus(@RequestParam(defaultValue = Menu.CONSOLE_INSIGHTS) String console) {
+    if (!Menu.CONSOLE_INSIGHTS.equals(console) && !Menu.CONSOLE_ADMIN.equals(console)) {
+      throw new ValidationException("console must be INSIGHTS or ADMIN");
+    }
+    return ApiResponse.of(meService.menus(currentUserProvider.get(), console));
   }
 
   /** auth_time arrives as epoch seconds from Keycloak; null when the client scope omits it. */

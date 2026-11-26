@@ -19,11 +19,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.admin.entity.Role;
 import org.openphc.cce.admin.entity.User;
+import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.entity.UserRole;
 import org.openphc.cce.admin.entity.UserStatus;
+import org.openphc.cce.admin.repository.MenuRepository;
+import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.repository.UserRoleRepository;
+import org.openphc.cce.admin.testsupport.TestAccounts;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -42,6 +46,8 @@ class MeEndpointIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private RoleRepository roleRepository;
+  @Autowired private MenuRepository menuRepository;
+  @Autowired private RoleMenuRepository roleMenuRepository;
   @Autowired private UserRoleRepository userRoleRepository;
   @SpyBean private UserRepository userRepository;
 
@@ -49,9 +55,7 @@ class MeEndpointIntegrationTest {
 
   @BeforeEach
   void createUser() {
-    user = newUser(UserStatus.ACTIVE);
-    Role superAdmin = roleRepository.findByName("SUPER_ADMIN").orElseThrow();
-    userRoleRepository.save(new UserRole(user.getId(), superAdmin.getId()));
+    user = new TestAccounts(userRepository, roleRepository, userRoleRepository).superAdmin("me-test");
   }
 
   @AfterEach
@@ -104,6 +108,67 @@ class MeEndpointIntegrationTest {
         .andExpect(jsonPath("$.data[1].label").value("Facilities"))
         .andExpect(jsonPath("$.data[4].path").value("/compliance/patients"))
         .andExpect(jsonPath("$.data[6].label").value("Ingestion"));
+  }
+
+  @Test
+  void consoleAdminReturnsTheFourAdminTabsForSuperAdmin() throws Exception {
+    mockMvc
+        .perform(get("/admin/v1/me/menus").param("console", "ADMIN").with(token(user.getEmail(), Instant.now())))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(4))
+        .andExpect(jsonPath("$.data[0].label").value("Users"))
+        .andExpect(jsonPath("$.data[0].path").value("/users"))
+        .andExpect(jsonPath("$.data[1].path").value("/roles"))
+        .andExpect(jsonPath("$.data[2].path").value("/menus"))
+        .andExpect(jsonPath("$.data[3].path").value("/protocols"));
+  }
+
+  @Test
+  void consoleInsightsIsTheExplicitFormOfTheDefault() throws Exception {
+    mockMvc
+        .perform(get("/admin/v1/me/menus").param("console", "INSIGHTS").with(token(user.getEmail(), Instant.now())))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(7));
+  }
+
+  @Test
+  void anUnknownConsoleIs400() throws Exception {
+    mockMvc
+        .perform(get("/admin/v1/me/menus").param("console", "nope").with(token(user.getEmail(), Instant.now())))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+  }
+
+  @Test
+  void aRoleHoldingOnlyTheProtocolsTabGetsJustThatTabAndNoInsightsMenus() throws Exception {
+    Role custom = new Role();
+    custom.setId(UUID.randomUUID());
+    custom.setName("TEST_ME_PROTO_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase());
+    custom.setDisplayName("Me test");
+    roleRepository.save(custom);
+    User holder = newUser(UserStatus.ACTIVE);
+    try {
+      userRoleRepository.save(new UserRole(holder.getId(), custom.getId()));
+      UUID protocols = menuRepository.findAll().stream().filter(m -> m.getMenuKey().equals("admin-protocols")).findFirst().orElseThrow().getId();
+      roleMenuRepository.save(new RoleMenu(custom.getId(), protocols));
+
+      mockMvc
+          .perform(get("/admin/v1/me/menus").param("console", "ADMIN").with(token(holder.getEmail(), Instant.now())))
+          .andExpect(jsonPath("$.data.length()").value(1))
+          .andExpect(jsonPath("$.data[0].path").value("/protocols"));
+      mockMvc
+          .perform(get("/admin/v1/me/menus").with(token(holder.getEmail(), Instant.now())))
+          .andExpect(jsonPath("$.data.length()").value(0));
+
+      // Untick it: the very next call sees nothing (no token refresh involved).
+      roleMenuRepository.deleteAll(roleMenuRepository.findAllByRoleId(custom.getId()));
+      mockMvc
+          .perform(get("/admin/v1/me/menus").param("console", "ADMIN").with(token(holder.getEmail(), Instant.now())))
+          .andExpect(jsonPath("$.data.length()").value(0));
+    } finally {
+      userRepository.deleteById(holder.getId());
+      roleRepository.deleteById(custom.getId());
+    }
   }
 
   @Test
