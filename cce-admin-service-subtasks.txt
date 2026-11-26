@@ -789,46 +789,54 @@ ESTIMATED EFFORT
 ================================================================================
 ADDENDUM — MILESTONES 7-8 (post-PRD): ROLE-AWARE CONSOLE + PROTOCOL MANAGEMENT
 ================================================================================
-Agreed 2026-11-25; see cce-admin-module-subtasks.txt for the decisions and the
-integrated exit checks. Same "docs first" rule: update the matching docs/ file in
-the same PR. The numbering of A0-A16 above is unchanged.
+Agreed 2026-11-25/26 (this replaces an earlier draft that proxied protocols through
+this service and seeded a PROTOCOL_MANAGER role). See cce-admin-module-subtasks.txt for
+the decisions, the open questions and the integrated exit checks, and
+docs/architecture-overview.md section 9.9. Same "docs first" rule: update the matching
+docs/ file in the same PR. A0-A16 above are unchanged; A20 no longer exists.
 
-SUB-TASK A17: Service-Level Authorization                           (~3 hours)
-  1. SecurityConfig: /admin/v1/protocols/** needs PROTOCOL_MANAGER or SUPER_ADMIN;
-     /admin/v1/me, /me/menus any signed-in ACTIVE user; health + Swagger open;
-     every other /admin/v1/** needs SUPER_ADMIN. Roles from realm_access.roles
-     (the JwtRoleConverter already produces them as authorities).
-  2. Shared test helper granting the SUPER_ADMIN authority; existing integration
-     tests switch to it. New tests: each row of the table allowed/denied, a token
-     with no roles gets 403 on management endpoints but 200 on /me, a missing
-     token is still 401.
-  ACCEPTANCE: a limited user's token is refused on /admin/v1/users and /roles by
-  the SERVICE (gateway bypassed); SUPER_ADMIN behaviour is unchanged.
+SUB-TASK A17: Service-Level Authorization + Credentials Check        (~3.5 hours)
+  1. SecurityConfig / a small access filter: /admin/v1/health and Swagger open;
+     /admin/v1/me and /me/menus any signed-in ACTIVE user; every other /admin/v1/**
+     needs SUPER_ADMIN. The check reads the user's DATABASE roles (user_roles), not the
+     token claim — the filter already loads the local user, so CurrentUser carries them.
+  2. Shared test helper that makes an ACTIVE local SUPER_ADMIN user and its token; the
+     six existing integration test classes switch to it. New tests: management endpoints
+     403 for a roleless or other-role user, /me and /me/menus 200 for the same user, a
+     role change takes effect on the very next request, SUPER_ADMIN unchanged, missing
+     token still 401.
+  3. Startup guard (profile "prod" only): refuse to start unless
+     KEYCLOAK_ADMIN_CLIENT_SECRET is set; the admin/admin password fallback is allowed
+     only outside prod. Test with an ApplicationContextRunner: prod without a secret
+     fails, prod with one starts, other profiles ignore it.
+  ACCEPTANCE: a user with no role gets 403 on /admin/v1/users and /roles from the
+  SERVICE (gateway bypassed) but 200 on /me; granting a role shows on the next call.
 
-SUB-TASK A18: Console-Aware Menus                                   (~3 hours)
+SUB-TASK A18: Console-Aware Menus                                    (~3.5 hours)
   1. V4__console_menus.sql: menus.console ('INSIGHTS' default | 'ADMIN'); seed
-     Users /users, Roles /roles, Menus /menus, Protocols /protocols as ADMIN and
-     link all four to SUPER_ADMIN. Idempotent.
+     admin-users /users, admin-roles /roles, admin-menus /menus, admin-protocols
+     /protocols (sort 1-4) as ADMIN and link all four to SUPER_ADMIN. Idempotent.
   2. GET /me/menus?console= (default INSIGHTS); GET /menus returns console.
-  ACCEPTANCE: GET /me/menus?console=ADMIN as SUPER_ADMIN returns the four entries;
-  a role without them gets none; the default call still returns the 7 insights menus.
+  3. PUT /roles/:id/menus: SUPER_ADMIN must keep all four admin entries (409 if
+     omitted); the Users, Roles and Menus admin entries can only be assigned to
+     SUPER_ADMIN (409 for any other role). Protocols and insights entries stay open.
+  ACCEPTANCE: ?console=ADMIN as SUPER_ADMIN returns four entries, a role without them
+  gets none, the default call still returns the seven insights menus, and both 409
+  rules hold.
 
-SUB-TASK A19: Protocol Gateway + Endpoints + Audit                  (~5 hours)
-  1. ProtocolGateway interface + HTTP implementation (explicit timeouts,
-     PROTOCOL_SERVICE_URL, 2 MB body limit); a fake for tests.
-  2. GET /protocols, GET /protocols/:id, POST /protocols, POST /protocols/:id/retire
-     as in api-reference.md; protocol-service 400/422 -> readable 4xx, unreachable
-     -> 502 PROTOCOL_SERVICE_UNAVAILABLE.
-  3. Audit PROTOCOL_UPLOADED / PROTOCOL_RETIRED, only on success.
-  ACCEPTANCE: a failed or rejected upload writes no audit row; a duplicate
-  (url, version) is a readable error, not a 500.
+SUB-TASK A19: Protocol Gateway Rows + Local Route                    (~2 hours)
+  1. V5__seed_super_admin_protocol_rows.sql: api_permissions rows for SUPER_ADMIN —
+     GET and POST /v1/protocol/protocol-definitions/** (category 'Protocol'). Inserted
+     into gateway's table, idempotent. No role is seeded.
+  2. scripts/run-gateway-local.sh: a route for /v1/protocol/** to the protocol service
+     (default http://localhost:8091), via the gateway's route environment variables.
+  3. Docs: developer-setup (run the protocol service on 8091; run the gateway sync after
+     V5) and deployment-guide.
+  NO new admin-service endpoints, and NO change to cce-protocol-service.
+  ACCEPTANCE: after V5 and a gateway sync a SUPER_ADMIN token can call
+  GET /v1/protocol/protocol-definitions through the local gateway; a role without the
+  rows gets 403.
 
-SUB-TASK A20: Seed PROTOCOL_MANAGER                                 (~2 hours)
-  1. V5__seed_protocol_manager.sql as in data-dictionary.md; document the gateway
-     sync as a deploy step; add the role to the bootstrap/deployment notes.
-  ACCEPTANCE: after migration and a gateway sync, PROTOCOL_MANAGER can be assigned
-  to a user (no ROLE_NOT_SYNCED), and that user's menus are exactly Protocols.
-
-  ADDENDUM TOTAL: ~13 hours
+  ADDENDUM TOTAL: ~9 hours
 
 ================================================================================
