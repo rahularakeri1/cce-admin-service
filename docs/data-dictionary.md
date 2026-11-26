@@ -109,7 +109,7 @@ constraint-violation 500 (B-40, "checked in service layer, not via FK error").
 
 ### 1.3 `menus` — Console Screen Catalog
 
-> **Planned change — Milestone 7 (V4).** `menus` gains `console VARCHAR(20) NOT NULL DEFAULT 'INSIGHTS'` (`INSIGHTS` or `ADMIN`) so the admin console's own tabs live in the same catalog as `cce-insights-ui`'s. V4 seeds four `ADMIN` entries — Users `/users`, Roles `/roles`, Menus `/menus`, Protocols `/protocols` — and links them all to `SUPER_ADMIN`. `GET /me/menus` filters by `console` (default `INSIGHTS`). Not implemented yet.
+> **Planned change — Milestone 7 (V4).** `menus` gains `console VARCHAR(20) NOT NULL DEFAULT 'INSIGHTS'` (`INSIGHTS` or `ADMIN`) so the admin console's own tabs live in the same catalog as `cce-insights-ui`'s. V4 seeds four `ADMIN` entries — Users `/users`, Roles `/roles`, Menus `/menus`, Protocols `/protocols` — and links them all to `SUPER_ADMIN`. `GET /me/menus` filters by `console` (default `INSIGHTS`). The Users, Roles and Menus `ADMIN` entries may only be assigned to `SUPER_ADMIN`, and `SUPER_ADMIN` must keep all four (both enforced by `PUT /roles/:id/menus`, `409`). Not implemented yet.
 
 One screen of `cce-insights-ui` (or a future console) that can appear as a sidebar link. A flat
 catalog — no parent/child nesting.
@@ -296,8 +296,6 @@ exhaustive — any future mutating endpoint needs its own value here.
 | `ROLE_MENUS_UPDATED` | `PUT /roles/:id/menus` (B-41) |
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/:id/permissions` (B-42) |
 | `MENU_CREATED` / `MENU_UPDATED` / `MENU_DELETED` | `/menus` CRUD (B-44) |
-| `PROTOCOL_UPLOADED` *(planned — Milestone 8)* | `POST /protocols` — `entity_type = PROTOCOL`, `entity_id` = the definition id, `after` = `{url, version, canonical}`. Only when the upload succeeded |
-| `PROTOCOL_RETIRED` *(planned — Milestone 8)* | `POST /protocols/:id/retire` — before/after status |
 
 ---
 
@@ -311,7 +309,7 @@ No migration exists yet. Suggested layout per milestone B1 (PRD §10):
 | V2 | `V2__seed.sql` | The **7** real `cce-insights-ui` sidebar menus (§1.3 — Dashboard, Facilities, Compliance, Deviations, Patients, Events, Ingestion, matching `Sidebar.tsx`; the PRD's 12-menu NAV/DETAIL model is not used), the `SUPER_ADMIN` system role (§1.2) linked to all 7, and 7 bootstrap `api_permissions` rows (`permission_name = 'SUPER_ADMIN'`, category `Admin`: `GET /admin/v1/me`, `GET /admin/v1/me/menus`, and `GET/POST/PUT/PATCH/DELETE /admin/v1/**`) — inserted as rows into the existing table, not a schema change. Idempotent (`ON CONFLICT` / `WHERE NOT EXISTS`). Seeds **no named admin account** — the first `SUPER_ADMIN` is provisioned per environment by `scripts/bootstrap-admin.sh` (see [architecture-overview.md §9.4](architecture-overview.md#94-bootstrap-sequencing--no-concrete-owner-yet)) |
 | V3 | `V3__users_system_flag.sql` | Adds `users.is_system` (`BOOLEAN NOT NULL DEFAULT false`). Nothing is flagged by the migration itself; re-run `scripts/bootstrap-admin.sh` once to flag an already-bootstrapped admin. |
 | V4 *(planned — Milestone 7)* | `V4__console_menus.sql` | `menus.console` plus the four `ADMIN` menu entries and their `SUPER_ADMIN` links (§1.3). |
-| V5 *(planned — Milestone 8)* | `V5__seed_protocol_manager.sql` | The standard `PROTOCOL_MANAGER` role (not a system role), its `role_menus` link to the Protocols admin menu, and `api_permissions` rows for `GET /admin/v1/me`, `GET /admin/v1/me/menus`, `GET` and `POST /admin/v1/protocols/**`. The realm role reaches Keycloak through the gateway sync. Idempotent. |
+| V5 *(planned — Milestone 8)* | `V5__seed_super_admin_protocol_rows.sql` | `api_permissions` rows for `SUPER_ADMIN`: `GET` and `POST /v1/protocol/protocol-definitions/**` (category `Protocol`) — inserted into gateway's existing table, idempotent. Nothing else is seeded: **no `PROTOCOL_MANAGER` role** — other roles are made by a `SUPER_ADMIN`. Run the gateway sync afterwards so gateway reloads its rules. |
 
 `pgcrypto` must be enabled in V1 before any `gen_random_uuid()` default is used — check first whether
 another service sharing `ccedb` has already enabled it.
