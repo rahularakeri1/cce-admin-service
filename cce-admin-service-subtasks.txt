@@ -795,7 +795,7 @@ the decisions, the open questions and the integrated exit checks, and
 docs/architecture-overview.md section 9.9. Same "docs first" rule: update the matching
 docs/ file in the same PR. A0-A16 above are unchanged; A20 no longer exists.
 
-SUB-TASK A17: Service-Level Authorization + Credentials Check        (~3.5 hours)
+SUB-TASK A17: Service-Level Authorization + Credentials Check        (~3.5 hours)  [DONE - Milestone 7]
   1. SecurityConfig / a small access filter: /admin/v1/health and Swagger open;
      /admin/v1/me and /me/menus any signed-in ACTIVE user; every other /admin/v1/**
      needs SUPER_ADMIN. The check reads the user's DATABASE roles (user_roles), not the
@@ -812,7 +812,7 @@ SUB-TASK A17: Service-Level Authorization + Credentials Check        (~3.5 hours
   ACCEPTANCE: a user with no role gets 403 on /admin/v1/users and /roles from the
   SERVICE (gateway bypassed) but 200 on /me; granting a role shows on the next call.
 
-SUB-TASK A18: Console-Aware Menus                                    (~3.5 hours)
+SUB-TASK A18: Console-Aware Menus                                    (~3.5 hours)  [DONE - Milestone 7]
   1. V4__console_menus.sql: menus.console ('INSIGHTS' default | 'ADMIN'); seed
      admin-users /users, admin-roles /roles, admin-menus /menus, admin-protocols
      /protocols (sort 1-4) as ADMIN and link all four to SUPER_ADMIN. Idempotent.
@@ -823,6 +823,8 @@ SUB-TASK A18: Console-Aware Menus                                    (~3.5 hours
   ACCEPTANCE: ?console=ADMIN as SUPER_ADMIN returns four entries, a role without them
   gets none, the default call still returns the seven insights menus, and both 409
   rules hold.
+  BUILT: error codes ADMIN_MENU_REQUIRED / ADMIN_MENU_SUPER_ADMIN_ONLY; GET /menus lists
+  insights menus first, then the admin tabs, each with its console.
 
 SUB-TASK A19: Protocol Gateway Rows + Local Route                    (~2 hours)
   1. V5__seed_super_admin_protocol_rows.sql: api_permissions rows for SUPER_ADMIN —

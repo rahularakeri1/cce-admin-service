@@ -16,7 +16,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -24,7 +23,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -43,6 +41,7 @@ import org.openphc.cce.admin.repository.AdminAuditLogRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.repository.UserRoleRepository;
+import org.openphc.cce.admin.testsupport.TestAccounts;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -88,7 +87,7 @@ class UserManagementIntegrationTest {
     when(keycloak.missingRealmRoles(anyCollection())).thenReturn(List.of());
     when(keycloak.updateUser(anyString(), any())).thenReturn(new KeycloakUserProfile("Old", "Person", "old@example.org", true));
 
-    actor = newUser("actor", UserStatus.ACTIVE);
+    actor = new TestAccounts(userRepository, roleRepository, userRoleRepository).superAdmin("mgmt-actor");
     target = newUser("target", UserStatus.ACTIVE);
     for (int i = 0; i < 6; i++) {
       Role r = new Role();
@@ -125,7 +124,7 @@ class UserManagementIntegrationTest {
   }
 
   private JwtRequestPostProcessor token() {
-    return jwt().jwt(b -> b.claim("email", actor.getEmail()).claim("auth_time", Instant.now().getEpochSecond()));
+    return TestAccounts.tokenFor(actor);
   }
 
   private ResultActions callPut(String path, String json) throws Exception {

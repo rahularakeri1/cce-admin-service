@@ -4,6 +4,7 @@ import org.openphc.cce.admin.security.CurrentUserAuthenticationFilter;
 import org.openphc.cce.admin.security.JwtRoleConverter;
 import org.openphc.cce.admin.security.RestAccessDeniedHandler;
 import org.openphc.cce.admin.security.RestAuthenticationEntryPoint;
+import org.openphc.cce.admin.security.SuperAdminAuthorizationManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -13,9 +14,9 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 
 /**
- * Every /admin/v1/** path is authenticated except /health and the Swagger/OpenAPI paths (B-05,
- * B-10). The JWT is re-validated independently of gateway-service, defense in depth — see
- * docs/architecture-overview.md §5.
+ * /health and the Swagger/OpenAPI paths are open (B-05, B-10); /me and /me/menus need any signed-in ACTIVE
+ * user; everything else under /admin/v1/** needs SUPER_ADMIN (Milestone 7). The JWT is re-validated
+ * independently of gateway-service, defense in depth — see docs/architecture-overview.md §5.
  */
 @Configuration
 public class SecurityConfig {
@@ -25,6 +26,7 @@ public class SecurityConfig {
       HttpSecurity http,
       JwtRoleConverter jwtRoleConverter,
       CurrentUserAuthenticationFilter currentUserAuthenticationFilter,
+      SuperAdminAuthorizationManager superAdminAuthorizationManager,
       RestAuthenticationEntryPoint authenticationEntryPoint,
       RestAccessDeniedHandler accessDeniedHandler)
       throws Exception {
@@ -36,8 +38,12 @@ public class SecurityConfig {
                 auth.requestMatchers(
                         "/admin/v1/health", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**")
                     .permitAll()
+                    // Any signed-in ACTIVE user: every console needs these to build its own shell.
+                    .requestMatchers("/admin/v1/me", "/admin/v1/me/menus")
+                    .authenticated()
+                    // Everything else (users, roles, menus, permissions) is SUPER_ADMIN's.
                     .anyRequest()
-                    .authenticated())
+                    .access(superAdminAuthorizationManager))
         .oauth2ResourceServer(
             (OAuth2ResourceServerConfigurer<HttpSecurity> oauth2) ->
                 oauth2

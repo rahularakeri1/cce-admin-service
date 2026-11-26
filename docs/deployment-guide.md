@@ -40,7 +40,7 @@ for why `JWT_ROLES_CLAIM_PATH` specifically needs a live check, not just copying
 | `KEYCLOAK_INVITE_LIFESPAN_SECONDS` | `259200` (72 h) | Validity of the invitation link |
 | `KEYCLOAK_INVITE_CLIENT_ID` / `KEYCLOAK_INVITE_REDIRECT_URI` | `cce-admin-ui` / `http://localhost:3002/` | Where the user lands after finishing the link; the redirect must be a valid redirect URI of that client |
 
-> **Planned — Milestone 7:** in the `prod` Spring profile (`SPRING_PROFILES_ACTIVE=prod`) the service refuses to
+> **Milestone 7:** in the `prod` Spring profile (`SPRING_PROFILES_ACTIVE=prod`) the service refuses to
 > start unless `KEYCLOAK_ADMIN_CLIENT_SECRET` is set, so it can never silently run on the `admin`/`admin` fallback.
 > Prerequisite for a Keycloak admin: a service-account client in the production `cce` realm with the user and role
 > management rights it needs.

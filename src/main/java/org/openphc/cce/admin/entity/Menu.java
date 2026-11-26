@@ -14,6 +14,9 @@ import org.hibernate.annotations.UpdateTimestamp;
 @Table(name = "menus")
 public class Menu {
 
+  public static final String CONSOLE_INSIGHTS = "INSIGHTS";
+  public static final String CONSOLE_ADMIN = "ADMIN";
+
   @Id private UUID id;
 
   @Column(name = "menu_key", nullable = false)
@@ -26,6 +29,10 @@ public class Menu {
   private String path;
 
   private String icon;
+
+  /** INSIGHTS (cce-insights-ui) or ADMIN (this console's own tabs) — see {@link #CONSOLE_ADMIN}. */
+  @Column(nullable = false)
+  private String console = CONSOLE_INSIGHTS;
 
   @Column(name = "sort_order", nullable = false)
   private int sortOrder = 0;
@@ -79,6 +86,14 @@ public class Menu {
 
   public void setIcon(String icon) {
     this.icon = icon;
+  }
+
+  public String getConsole() {
+    return console;
+  }
+
+  public void setConsole(String console) {
+    this.console = console;
   }
 
   public int getSortOrder() {

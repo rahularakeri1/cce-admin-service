@@ -109,7 +109,7 @@ constraint-violation 500 (B-40, "checked in service layer, not via FK error").
 
 ### 1.3 `menus` — Console Screen Catalog
 
-> **Planned change — Milestone 7 (V4).** `menus` gains `console VARCHAR(20) NOT NULL DEFAULT 'INSIGHTS'` (`INSIGHTS` or `ADMIN`) so the admin console's own tabs live in the same catalog as `cce-insights-ui`'s. V4 seeds four `ADMIN` entries — Users `/users`, Roles `/roles`, Menus `/menus`, Protocols `/protocols` — and links them all to `SUPER_ADMIN`. `GET /me/menus` filters by `console` (default `INSIGHTS`). The Users, Roles and Menus `ADMIN` entries may only be assigned to `SUPER_ADMIN`, and `SUPER_ADMIN` must keep all four (both enforced by `PUT /roles/:id/menus`, `409`). Not implemented yet.
+> **Milestone 7 (V4).** `menus` has a `console` column (`INSIGHTS` or `ADMIN`) so the admin console's own tabs live in the same catalog as `cce-insights-ui`'s. V4 seeded four `ADMIN` entries — Users `/users`, Roles `/roles`, Menus `/menus`, Protocols `/protocols` (`menu_key` `admin-users`, `admin-roles`, `admin-menus`, `admin-protocols`) — and linked them all to `SUPER_ADMIN`; no other role gets any. `GET /me/menus` filters by `console` (default `INSIGHTS`). The Users, Roles and Menus `ADMIN` entries may only be assigned to `SUPER_ADMIN`, and `SUPER_ADMIN` must keep all four — both rules are enforced in code by `PUT /roles/:id/menus` (`409`), not by a database constraint.
 
 One screen of `cce-insights-ui` (or a future console) that can appear as a sidebar link. A flat
 catalog — no parent/child nesting.
@@ -128,6 +128,7 @@ catalog — no parent/child nesting.
 | `label` | `VARCHAR(150)` | No | — | Display text |
 | `path` | `VARCHAR(255)` | No | — | Route path in the console |
 | `icon` | `VARCHAR(100)` | Yes | — | Icon identifier (console-specific, e.g. a Heroicons name) |
+| `console` | `VARCHAR(20)` | No | `'INSIGHTS'` | Which console shows it: `INSIGHTS` (`cce-insights-ui`) or `ADMIN` (this console's own tabs). `CHECK` constraint `ck_menus_console`. Added by V4 |
 | `sort_order` | `INTEGER` | No | `0` | Ordering among menus |
 | `is_active` | `BOOLEAN` | No | `true` | Inactive menus are excluded from `GET /me/menus` (B-21) |
 | `created_at` | `TIMESTAMPTZ` | No | `now()` | — |
@@ -136,11 +137,13 @@ catalog — no parent/child nesting.
 **Constraints:**
 - `PK`: `id`
 - `UNIQUE`: `menu_key`
+- `CHECK` `ck_menus_console`: `console IN ('INSIGHTS', 'ADMIN')` (V4)
 
 **Indexes:**
 | Index | Columns | Purpose |
 |---|---|---|
 | `idx_menus_active` | `is_active` | Filtering inactive rows |
+| `idx_menus_console` | `console` | Per-console menu lookups (V4) |
 
 Deleting a menu also removes its `role_menus` rows (B-44) — a hard delete of the join, not of the
 role or a soft-deactivation of the mapping.
@@ -308,7 +311,7 @@ No migration exists yet. Suggested layout per milestone B1 (PRD §10):
 | V1 | `V1__create_admin_service_schema.sql` | The **six** tables this service owns (`users`, `roles`, `menus`, `role_menus`, `user_roles`, `admin_audit_log`), straight from §1.1–1.5 and §1.7 of this document, created in `ccedb`'s `public` schema with ledger `flyway_schema_history_admin`. Does **not** touch `api_permissions` — that table already exists (§1.6). Have a reviewer diff the columns against this file before merging (PRD milestone note) |
 | V2 | `V2__seed.sql` | The **7** real `cce-insights-ui` sidebar menus (§1.3 — Dashboard, Facilities, Compliance, Deviations, Patients, Events, Ingestion, matching `Sidebar.tsx`; the PRD's 12-menu NAV/DETAIL model is not used), the `SUPER_ADMIN` system role (§1.2) linked to all 7, and 7 bootstrap `api_permissions` rows (`permission_name = 'SUPER_ADMIN'`, category `Admin`: `GET /admin/v1/me`, `GET /admin/v1/me/menus`, and `GET/POST/PUT/PATCH/DELETE /admin/v1/**`) — inserted as rows into the existing table, not a schema change. Idempotent (`ON CONFLICT` / `WHERE NOT EXISTS`). Seeds **no named admin account** — the first `SUPER_ADMIN` is provisioned per environment by `scripts/bootstrap-admin.sh` (see [architecture-overview.md §9.4](architecture-overview.md#94-bootstrap-sequencing--no-concrete-owner-yet)) |
 | V3 | `V3__users_system_flag.sql` | Adds `users.is_system` (`BOOLEAN NOT NULL DEFAULT false`). Nothing is flagged by the migration itself; re-run `scripts/bootstrap-admin.sh` once to flag an already-bootstrapped admin. |
-| V4 *(planned — Milestone 7)* | `V4__console_menus.sql` | `menus.console` plus the four `ADMIN` menu entries and their `SUPER_ADMIN` links (§1.3). |
+| V4 | `V4__console_menus.sql` | Adds `menus.console` (`VARCHAR(20) NOT NULL DEFAULT 'INSIGHTS'`, `CHECK` in `INSIGHTS`/`ADMIN`, indexed), seeds the four `ADMIN` menu entries and links them to `SUPER_ADMIN` (§1.3). The 7 existing menus take the default. Idempotent. |
 | V5 *(planned — Milestone 8)* | `V5__seed_super_admin_protocol_rows.sql` | `api_permissions` rows for `SUPER_ADMIN`: `GET` and `POST /v1/protocol/protocol-definitions/**` (category `Protocol`) — inserted into gateway's existing table, idempotent. Nothing else is seeded: **no `PROTOCOL_MANAGER` role** — other roles are made by a `SUPER_ADMIN`. Run the gateway sync afterwards so gateway reloads its rules. |
 
 `pgcrypto` must be enabled in V1 before any `gen_random_uuid()` default is used — check first whether

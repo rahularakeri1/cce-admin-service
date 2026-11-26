@@ -9,7 +9,6 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -17,7 +16,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +35,7 @@ import org.openphc.cce.admin.repository.ApiPermissionRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.repository.UserRoleRepository;
+import org.openphc.cce.admin.testsupport.TestAccounts;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -73,8 +72,7 @@ class RolePermissionEndpointIntegrationTest {
   void setUp() {
     reset(gateway);
     when(gateway.sync()).thenReturn(OK);
-    actor = newUser();
-    userRoleRepository.save(new UserRole(actor.getId(), roleRepository.findByName("SUPER_ADMIN").orElseThrow().getId()));
+    actor = accounts().superAdmin("perm-test-actor");
   }
 
   @AfterEach
@@ -97,8 +95,12 @@ class RolePermissionEndpointIntegrationTest {
     return userRepository.save(u);
   }
 
+  private TestAccounts accounts() {
+    return new TestAccounts(userRepository, roleRepository, userRoleRepository);
+  }
+
   private JwtRequestPostProcessor token() {
-    return jwt().jwt(b -> b.claim("email", actor.getEmail()).claim("auth_time", Instant.now().getEpochSecond()));
+    return TestAccounts.tokenFor(actor);
   }
 
   private UUID createRole() throws Exception {

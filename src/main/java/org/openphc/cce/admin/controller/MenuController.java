@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Read-only for now: the Role Detail → Menus tab needs the full catalog. Create/update/delete of
- * menus arrive with Milestone 7 (Menus Catalog).
+ * menus arrive with Milestone 9 (Menus Catalog).
  */
 @RestController
 @RequestMapping("/admin/v1/menus")
@@ -25,7 +25,8 @@ public class MenuController {
 
   @GetMapping
   public ApiResponse<List<MenuResponse>> list() {
-    return ApiResponse.of(
-        menuRepository.findAll(Sort.by("sortOrder", "label")).stream().map(MenuResponse::from).toList());
+    // Insights menus first, then the admin console's own tabs (console DESC: 'INSIGHTS' sorts after 'ADMIN').
+    Sort order = Sort.by(Sort.Order.desc("console"), Sort.Order.asc("sortOrder"), Sort.Order.asc("label"));
+    return ApiResponse.of(menuRepository.findAll(order).stream().map(MenuResponse::from).toList());
   }
 }

@@ -66,6 +66,13 @@ port `8085`.
 | `JWT_AUDIENCE` | — | Must match `gateway-service` for the same realm |
 | `JWT_ROLES_CLAIM_PATH` | `realm_access.roles` | Confirm against the actually-configured realm — see [architecture-overview.md §9.2](architecture-overview.md#92-role-claim-path--confirm-before-keycloak-provisioning) before assuming the default is correct |
 | `KEYCLOAK_*` | — | Admin REST API credentials (service-account client) |
+| `SPRING_PROFILES_ACTIVE` | — | With `prod` the service refuses to start unless `KEYCLOAK_ADMIN_CLIENT_SECRET` is set (Milestone 7); leave it unset locally |
+
+**Who may call what (Milestone 7).** The service decides on the caller's *database* roles (`user_roles`), so a
+local user with no role gets `403` on `/admin/v1/users`, `/roles` and `/menus` even though you call the service
+directly and the gateway is bypassed. Only `/me`, `/me/menus` and `/health` are open to any signed-in user. In
+integration tests make the caller with `testsupport/TestAccounts` (`superAdmin(...)` + `tokenFor(...)`): a token
+with just an `email` claim is a roleless user.
 
 Package layout, build order and testing approach: see
 [architecture-overview.md §6 and §8](architecture-overview.md#6-package-layout).

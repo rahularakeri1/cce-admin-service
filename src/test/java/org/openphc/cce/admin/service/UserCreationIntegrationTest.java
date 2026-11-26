@@ -15,12 +15,10 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -41,6 +39,7 @@ import org.openphc.cce.admin.repository.AdminAuditLogRepository;
 import org.openphc.cce.admin.repository.RoleRepository;
 import org.openphc.cce.admin.repository.UserRepository;
 import org.openphc.cce.admin.repository.UserRoleRepository;
+import org.openphc.cce.admin.testsupport.TestAccounts;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -84,14 +83,7 @@ class UserCreationIntegrationTest {
     when(keycloak.missingRealmRoles(anyCollection())).thenReturn(List.of());
     when(keycloak.createUser(any(KeycloakUserSpec.class))).thenReturn("kc-" + UUID.randomUUID());
 
-    actor = new User();
-    actor.setId(UUID.randomUUID());
-    actor.setUsername("create-actor-" + actor.getId());
-    actor.setEmail("create-actor-" + actor.getId() + "@example.org");
-    actor.setFirstName("A");
-    actor.setLastName("B");
-    actor.setStatus(UserStatus.ACTIVE);
-    userRepository.save(actor);
+    actor = new TestAccounts(userRepository, roleRepository, userRoleRepository).superAdmin("create-actor");
 
     role = new Role();
     role.setId(UUID.randomUUID());
@@ -109,7 +101,7 @@ class UserCreationIntegrationTest {
   }
 
   private JwtRequestPostProcessor token() {
-    return jwt().jwt(b -> b.claim("email", actor.getEmail()).claim("auth_time", Instant.now().getEpochSecond()));
+    return TestAccounts.tokenFor(actor);
   }
 
   private String body(String username, String email, UUID... roleIds) {
