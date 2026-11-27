@@ -16,8 +16,6 @@ import org.openphc.cce.admin.exception.ConflictException;
 import org.openphc.cce.admin.exception.NotFoundException;
 import org.openphc.cce.admin.exception.ValidationException;
 import org.openphc.cce.admin.repository.MenuRepository;
-import org.openphc.cce.admin.repository.RoleMenuRepository;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,12 +34,10 @@ public class MenuService {
   private static final String ENTITY_TYPE = "MENU";
 
   private final MenuRepository menuRepository;
-  private final RoleMenuRepository roleMenuRepository;
   private final AuditLogWriter auditLogWriter;
 
-  public MenuService(MenuRepository menuRepository, RoleMenuRepository roleMenuRepository, AuditLogWriter auditLogWriter) {
+  public MenuService(MenuRepository menuRepository, AuditLogWriter auditLogWriter) {
     this.menuRepository = menuRepository;
-    this.roleMenuRepository = roleMenuRepository;
     this.auditLogWriter = auditLogWriter;
   }
 
@@ -50,34 +46,6 @@ public class MenuService {
   public List<MenuResponse> list() {
     Sort order = Sort.by(Sort.Order.desc("console"), Sort.Order.asc("sortOrder"), Sort.Order.asc("label"));
     return menuRepository.findAll(order).stream().map(MenuResponse::from).toList();
-  }
-
-  @Transactional
-  public MenuResponse create(MenuRequest request, UUID actorId, String ip) {
-    String key = request.menuKey();
-    if (menuRepository.existsByMenuKey(key)) {
-      throw ConflictException.duplicateMenuKey(key);
-    }
-    Menu menu = new Menu();
-    menu.setId(UUID.randomUUID());
-    menu.setMenuKey(key);
-    menu.setConsole(Menu.CONSOLE_INSIGHTS); // admin tabs need code behind them: migrations only
-    apply(menu, request);
-    // No explicit position: the end of the list, so a new entry never jumps in front of the arrangement.
-    menu.setSortOrder(
-        request.sortOrder() != null ? request.sortOrder() : menuRepository.maxSortOrder(Menu.CONSOLE_INSIGHTS) + 1);
-    menu.setActive(request.isActive() == null || request.isActive());
-
-    Menu saved;
-    try {
-      saved = menuRepository.saveAndFlush(menu);
-    } catch (DataIntegrityViolationException race) {
-      // Two admins creating the same key at once: the unique constraint is the final authority.
-      throw ConflictException.duplicateMenuKey(key);
-    }
-    MenuResponse response = MenuResponse.from(saved);
-    auditLogWriter.write(actorId, AuditAction.MENU_CREATED, ENTITY_TYPE, saved.getId().toString(), null, response, ip);
-    return response;
   }
 
   @Transactional
@@ -140,27 +108,6 @@ public class MenuService {
     after.put("menuIds", requested);
     auditLogWriter.write(actorId, AuditAction.MENU_ORDER_UPDATED, ENTITY_TYPE, console, before, after, ip);
     return list();
-  }
-
-  /**
-   * Hard delete. The entry also leaves every role that held it: exactly its own role_menus rows go, nobody else's
-   * (the audit row records how many). Deactivating (update with isActive=false) is the gentler way to retire one.
-   */
-  @Transactional
-  public void delete(UUID id, UUID actorId, String ip) {
-    Menu menu = find(id);
-    if (isAdminTab(menu)) {
-      throw ConflictException.adminMenuProtected(menu.getLabel(), "it can't be deleted");
-    }
-    long assignments = roleMenuRepository.countByMenuId(id);
-    Map<String, Object> before = new LinkedHashMap<>();
-    before.put("menu", MenuResponse.from(menu));
-    before.put("roleAssignmentsRemoved", assignments);
-
-    roleMenuRepository.deleteAllByMenuId(id);
-    menuRepository.delete(menu);
-    menuRepository.flush();
-    auditLogWriter.write(actorId, AuditAction.MENU_DELETED, ENTITY_TYPE, id.toString(), before, null, ip);
   }
 
   private static boolean isAdminTab(Menu menu) {
