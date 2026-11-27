@@ -41,7 +41,7 @@ Error:
 | 409 | `DUPLICATE_ROLE_NAME` / `DUPLICATE_MENU_KEY` / `EMAIL_IN_USE` | Unique constraint conflict |
 | 409 | `MENU_KEY_IMMUTABLE` / `ADMIN_MENU_PROTECTED` | A menu's key changed, or a protected admin tab deleted, deactivated or moved — see [Menus](#menus) |
 | 409 | `MENU_ORDER_OUTDATED` | `PUT /menus/order` with a list that is no longer that console's exact set of entries — see [Menus](#menus) |
-| 409 | `ADMIN_MENU_REQUIRED` / `ADMIN_MENU_SUPER_ADMIN_ONLY` | A role's menu set breaks the admin tab rules — see `PUT /roles/:id/menus` |
+| 409 | `ADMIN_MENU_REQUIRED` / `SUPER_ADMIN_MENU_REQUIRED` / `ADMIN_MENU_SUPER_ADMIN_ONLY` | A role's menu set breaks the menu rules (SUPER_ADMIN must keep every menu; Users, Roles, Menus are SUPER_ADMIN-only) — see `PUT /roles/:id/menus` |
 | 409 | `ROLE_IN_USE` | Delete of a role still assigned to users |
 | 409 | `SYSTEM_ROLE_IMMUTABLE` | Modify or delete of an `is_system` role |
 | 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak or gateway sync call failed; local state is partially applied — see [architecture-overview.md §7](architecture-overview.md#7-consistency-model) |
@@ -409,10 +409,15 @@ checked before anything is saved or audited:
 | Rule | Code |
 |---|---|
 | `SUPER_ADMIN`'s four admin entries (Users, Roles, Menus, Protocols) cannot be removed — a request that omits any of them is refused, so nobody can lock themselves out | `ADMIN_MENU_REQUIRED` |
+| `SUPER_ADMIN` must also keep **every insights entry** (Milestone 9 follow-up) — it is the role that sees everything, so a request that omits any menu of the catalog (active or not) is refused; removing one would silently hide that page from every SUPER_ADMIN in Insights | `SUPER_ADMIN_MENU_REQUIRED` |
 | The **Users, Roles and Menus** admin entries can only be assigned to `SUPER_ADMIN` — assigning one to any other role is refused, because every call behind them is `SUPER_ADMIN`-only | `ADMIN_MENU_SUPER_ADMIN_ONLY` |
 
-The Protocols entry and the insights entries stay assignable to any role (insights entries stay editable on
-`SUPER_ADMIN` too). The UI greys out what the server would refuse. Audits `ROLE_MENUS_UPDATED` (before/after
+So `SUPER_ADMIN`'s menu set is fixed: **the whole catalog**. A request must contain every menu id (the admin tabs are
+checked first, so a request missing one of them is `ADMIN_MENU_REQUIRED`; any other missing entry is
+`SUPER_ADMIN_MENU_REQUIRED`). When a new menu is added by a migration, it must be given to `SUPER_ADMIN` in the same
+migration, or the next save on that role is refused until it is ticked. The Protocols entry and the insights entries
+stay assignable to every **other** role. The UI shows `SUPER_ADMIN`'s menus ticked and locked, and greys out what the
+server would refuse. Audits `ROLE_MENUS_UPDATED` (before/after
 menu ids).
 
 ```json
