@@ -12,10 +12,6 @@ public class ConflictException extends ApiException {
     return new ConflictException("DUPLICATE_ROLE_NAME", "Role name already in use: " + name);
   }
 
-  public static ConflictException duplicateMenuKey(String key) {
-    return new ConflictException("DUPLICATE_MENU_KEY", "Menu key already in use: " + key);
-  }
-
   public static ConflictException emailInUse(String email) {
     return new ConflictException("EMAIL_IN_USE", "Email already in use: " + email);
   }
