@@ -205,3 +205,17 @@ correct and isn't.
 
 Integration check (milestone E2E): run scenarios S1–S6 from the PRD §3 against the real local service
 — not against MSW — before considering the module done.
+
+### End-to-end run (Milestone 11)
+
+`scripts/e2e/run_e2e.py` runs S1–S9, the failure paths and the Q3 claim-path check against the real local stack and
+removes everything it creates. Python 3 standard library only; the gateway jar must be built and the stack running
+(Keycloak, Postgres, this service on 8085, the protocol service on 8091, the insights service on 8093):
+
+```bash
+python3 -I scripts/e2e/run_e2e.py --json /tmp/e2e.json   # add --skip-s6 to leave the gateway on 8090 alone
+```
+
+It starts two throw-away gateways on 8190 and 8191, signs in test users through the `cce-admin-ui` client (the
+"direct access grants" switch is turned on for the run and restored), and exits non-zero on any failed check. The last
+results and findings are in [e2e-report.md](e2e-report.md).
