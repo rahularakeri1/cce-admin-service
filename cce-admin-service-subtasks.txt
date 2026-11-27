@@ -839,6 +839,20 @@ SUB-TASK A19: Protocol Gateway Rows + Local Route                    (~2 hours) 
   GET /v1/protocol/protocol-definitions through the local gateway; a role without the
   rows gets 403.
 
-  ADDENDUM TOTAL: ~9 hours
+SUB-TASK A21: Menu Arrangement (reorder)                             (~1.5 hours)
+  Added during Milestone 9 (the user asked to arrange menus by dragging instead of typing sort
+  numbers). Docs: api-reference.md (Menus), data-dictionary.md (menus.sort_order, audit actions).
+  1. PUT /admin/v1/menus/order { console, menuIds }: the COMPLETE ordered list of one console;
+     renumbers sort_order to 1..n in one transaction; answers 200 with the full catalog.
+     400 for a missing/invalid console, missing menuIds or a duplicate; 409 MENU_ORDER_OUTDATED when
+     the list is not exactly that console's current set (an entry added/deleted since the caller
+     loaded it, or from the other console) - nothing changes.
+  2. POST /menus with no sortOrder puts the entry at the END of its console (max + 1), not at 0.
+  3. Audit MENU_ORDER_UPDATED (entity_id = the console; before/after = ordered ids).
+  ACCEPTANCE: a permutation is saved and read back (GET /menus, GET /me/menus) in that order and the
+  positions are 1..n; an omitted, extra, foreign or duplicated id is refused and changes nothing;
+  admin tabs can be arranged; a roleless user is 403; a new menu lands last.
+
+  ADDENDUM TOTAL: ~10.5 hours (A21 added in Milestone 9)
 
 ================================================================================
