@@ -127,7 +127,7 @@ catalog — no parent/child nesting.
 | `menu_key` | `VARCHAR(100)` | No | — | Stable identifier, unique. Violated → `409 DUPLICATE_MENU_KEY` (B-44) |
 | `label` | `VARCHAR(150)` | No | — | Display text |
 | `path` | `VARCHAR(255)` | No | — | Route path in the console |
-| `icon` | `VARCHAR(100)` | Yes | — | Icon identifier (console-specific, e.g. a Heroicons outline name such as `ChartBarIcon`). Stored and returned by `GET /me/menus` / `GET /menus` for any console to draw. From Milestone 9c (planned) `cce-admin-ui` draws a curated set of Heroicons (sidebar, Menus table and form); `cce-insights-ui` does not read it yet (its sidebar is hardcoded) |
+| `icon` | `VARCHAR(100)` | Yes | — | Icon identifier (console-specific, e.g. a Heroicons outline name such as `ChartBarIcon`). Stored and returned by `GET /me/menus` / `GET /menus` for any console to draw. As of Milestone 9c (the `cce-admin-ui` icons PR) `cce-admin-ui` draws a curated set of Heroicons (sidebar, Menus table and form); `cce-insights-ui` does not read it yet (its sidebar is hardcoded) |
 | `console` | `VARCHAR(20)` | No | `'INSIGHTS'` | Which console shows it: `INSIGHTS` (`cce-insights-ui`) or `ADMIN` (this console's own tabs). `CHECK` constraint `ck_menus_console`. Added by V4 |
 | `sort_order` | `INTEGER` | No | `0` | Position among the menus **of the same `console`**, ascending. From Milestone 9b (planned) `PUT /menus/order` (the Menus screen's drag-and-drop) renumbers a console to `1..n` and a menu created without one goes to the end (one past the current last); until then a menu created without one gets `0`. Equal values fall back to `label` |
 | `is_active` | `BOOLEAN` | No | `true` | Inactive menus are excluded from `GET /me/menus` (B-21) |
