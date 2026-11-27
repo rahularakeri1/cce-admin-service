@@ -124,12 +124,12 @@ catalog — no parent/child nesting.
 | Column | Type | Nullable | Default | Description |
 |---|---|---|---|---|
 | `id` | `UUID` | No | `gen_random_uuid()` | Primary key |
-| `menu_key` | `VARCHAR(100)` | No | — | Stable identifier, unique. Violated → `409 DUPLICATE_MENU_KEY` (B-44) |
+| `menu_key` | `VARCHAR(100)` | No | — | Stable identifier, unique. Rows come from migrations; the API no longer creates them |
 | `label` | `VARCHAR(150)` | No | — | Display text |
 | `path` | `VARCHAR(255)` | No | — | Route path in the console |
 | `icon` | `VARCHAR(100)` | Yes | — | Icon identifier (console-specific, e.g. a Heroicons outline name such as `ChartBarIcon`). Stored and returned by `GET /me/menus` / `GET /menus` for any console to draw. As of Milestone 9c (the `cce-admin-ui` icons PR) `cce-admin-ui` draws a curated set of Heroicons (sidebar, Menus table and form); `cce-insights-ui` does not read it yet (its sidebar is hardcoded) |
 | `console` | `VARCHAR(20)` | No | `'INSIGHTS'` | Which console shows it: `INSIGHTS` (`cce-insights-ui`) or `ADMIN` (this console's own tabs). `CHECK` constraint `ck_menus_console`. Added by V4 |
-| `sort_order` | `INTEGER` | No | `0` | Position among the menus **of the same `console`**, ascending. `PUT /menus/order` (the Menus screen's drag-and-drop) renumbers a console to `1..n`; a menu created without one goes to the end (one past the current last). Equal values fall back to `label` |
+| `sort_order` | `INTEGER` | No | `0` | Position among the menus **of the same `console`**, ascending. `PUT /menus/order` (the Menus screen's drag-and-drop) renumbers a console to `1..n`; Equal values fall back to `label` |
 | `is_active` | `BOOLEAN` | No | `true` | Inactive menus are excluded from `GET /me/menus` (B-21) |
 | `created_at` | `TIMESTAMPTZ` | No | `now()` | — |
 | `updated_at` | `TIMESTAMPTZ` | No | `now()` | — |
@@ -145,12 +145,12 @@ catalog — no parent/child nesting.
 | `idx_menus_active` | `is_active` | Filtering inactive rows |
 | `idx_menus_console` | `console` | Per-console menu lookups (V4) |
 
-Deleting a menu also removes its `role_menus` rows (B-44) — a hard delete of the join, not of the
-role or a soft-deactivation of the mapping. **Business rules, not database constraints** (`MenuService`): a menu's
-`menu_key` never changes after creation; entries created through the API are always `INSIGHTS`; and the four `ADMIN`
-entries cannot be deleted, deactivated or have their `path` changed (`409 ADMIN_MENU_PROTECTED`) — the admin console's
-own sidebar is built from them. Deactivating (`is_active = false`) keeps the `role_menus` rows; only a delete removes
-them.
+The catalog is **edit-only** (Milestone 9 follow-up): the API has no create or delete, so rows are added only by a
+migration, together with the page they point to. Deleting a row by hand still cascades to its `role_menus` rows
+(`ON DELETE CASCADE`), but that is a database operation, not an API one. **Business rules, not database constraints**
+(`MenuService`): a menu's `menu_key` never changes; the four `ADMIN` entries cannot be deactivated or have their `path`
+changed (`409 ADMIN_MENU_PROTECTED`) — the admin console's own sidebar is built from them. Deactivating
+(`is_active = false`) keeps the `role_menus` rows.
 
 ---
 
@@ -302,7 +302,7 @@ exhaustive — any future mutating endpoint needs its own value here.
 | `ROLE_DELETED` | `DELETE /roles/:id` |
 | `ROLE_MENUS_UPDATED` | `PUT /roles/:id/menus` (B-41) |
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/:id/permissions` (B-42) |
-| `MENU_CREATED` / `MENU_UPDATED` / `MENU_DELETED` | `/menus` CRUD (B-44). `MENU_DELETED`'s `before` is `{ menu, roleAssignmentsRemoved }` |
+| `MENU_UPDATED` | `PUT /menus/:id` (B-44). `MENU_CREATED` / `MENU_DELETED` were written by earlier releases and remain in the log; the API no longer produces them |
 | `MENU_ORDER_UPDATED` | `PUT /menus/order`. `entity_id` is the console (`INSIGHTS` / `ADMIN`); `before` / `after` are `{ console, menuIds }` in the old and new order |
 
 ---
