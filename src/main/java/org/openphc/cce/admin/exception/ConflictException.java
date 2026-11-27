@@ -88,6 +88,13 @@ public class ConflictException extends ApiException {
         "A menu's key can't be changed (roles and code refer to it by key); it is " + key);
   }
 
+  public static ConflictException menuOrderOutdated(String console) {
+    return new ConflictException(
+        "MENU_ORDER_OUTDATED",
+        "The " + console + " menu list changed since you loaded it (an entry was added or deleted)."
+            + " Reload it and arrange it again.");
+  }
+
   public static ConflictException adminMenuProtected(String label, String what) {
     return new ConflictException(
         "ADMIN_MENU_PROTECTED",

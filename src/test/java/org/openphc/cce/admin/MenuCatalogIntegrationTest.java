@@ -169,8 +169,18 @@ class MenuCatalogIntegrationTest {
   }
 
   @Test
-  void missingSortOrderDefaultsToZero() throws Exception {
-    String res = send(post("/admin/v1/menus"), body(uniqueKey(), "Zero", "/zero", null, null, null)).andExpect(status().isCreated()).andExpect(jsonPath("$.data.sortOrder").value(0)).andExpect(jsonPath("$.data.icon").doesNotExist()).andReturn().getResponse().getContentAsString();
+  void aNewEntryWithNoSortOrderGoesToTheEndOfInsights() throws Exception {
+    int lastBefore = menuRepository.maxSortOrder(Menu.CONSOLE_INSIGHTS);
+    String res = send(post("/admin/v1/menus"), body(uniqueKey(), "Last", "/last", null, null, null)).andExpect(status().isCreated()).andExpect(jsonPath("$.data.sortOrder").value(lastBefore + 1)).andExpect(jsonPath("$.data.icon").doesNotExist()).andReturn().getResponse().getContentAsString();
+    createdMenuIds.add(UUID.fromString(JsonPath.read(res, "$.data.id")));
+    // and it really is last in the catalog and in a holder's sidebar order
+    List<String> insights = JsonPath.read(mockMvc.perform(get("/admin/v1/menus").with(token())).andReturn().getResponse().getContentAsString(), "$.data[?(@.console=='INSIGHTS')].label");
+    assertThat(insights.get(insights.size() - 1)).isEqualTo("Last");
+  }
+
+  @Test
+  void anExplicitSortOrderIsStillHonoured() throws Exception {
+    String res = send(post("/admin/v1/menus"), body(uniqueKey(), "Pinned", "/pinned", null, 0, null)).andExpect(status().isCreated()).andExpect(jsonPath("$.data.sortOrder").value(0)).andReturn().getResponse().getContentAsString();
     createdMenuIds.add(UUID.fromString(JsonPath.read(res, "$.data.id")));
   }
 
@@ -339,6 +349,134 @@ class MenuCatalogIntegrationTest {
       send(put("/admin/v1/menus/" + m.getId()), body(m.getMenuKey(), label, m.getPath(), icon, sort, true)).andExpect(status().isOk());
     }
     assertThat(menuRepository.findById(m.getId()).orElseThrow().getLabel()).isEqualTo(label);
+  }
+
+  // ---- arranging (PUT /menus/order) --------------------------------------------------------------------
+
+  private List<UUID> orderOf(String console) {
+    return menuRepository.findAllByConsoleOrderBySortOrderAsc(console).stream()
+        .sorted(java.util.Comparator.comparingInt(Menu::getSortOrder).thenComparing(Menu::getLabel))
+        .map(Menu::getId)
+        .toList();
+  }
+
+  private static String ids(List<UUID> ids) {
+    return String.join(",", ids.stream().map(i -> "\"" + i + "\"").toList());
+  }
+
+  private ResultActions reorder(String console, List<UUID> menuIds) throws Exception {
+    return send(put("/admin/v1/menus/order"), "{\"console\":\"" + console + "\",\"menuIds\":[" + ids(menuIds) + "]}");
+  }
+
+  private static List<UUID> reversed(List<UUID> list) {
+    List<UUID> copy = new ArrayList<>(list);
+    java.util.Collections.reverse(copy);
+    return copy;
+  }
+
+  @Test
+  void aNewOrderIsSavedAsPositionsOneToNAndReadBackInThatOrder() throws Exception {
+    UUID extra = createMenu(uniqueKey(), "Extra", "/extra");
+    List<UUID> original = orderOf(Menu.CONSOLE_INSIGHTS);
+    assertThat(original).contains(extra);
+    List<UUID> flipped = reversed(original);
+    try {
+      reorder(Menu.CONSOLE_INSIGHTS, flipped)
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data[?(@.console=='INSIGHTS')].id").value(org.hamcrest.Matchers.contains(flipped.stream().map(UUID::toString).toArray())));
+
+      assertThat(orderOf(Menu.CONSOLE_INSIGHTS)).containsExactlyElementsOf(flipped);
+      assertThat(menuRepository.findAllByConsoleOrderBySortOrderAsc(Menu.CONSOLE_INSIGHTS)).extracting(Menu::getSortOrder).containsExactly(java.util.stream.IntStream.rangeClosed(1, flipped.size()).boxed().toArray(Integer[]::new));
+      // a holder's sidebar follows the new order
+      Role role = newRole();
+      flipped.forEach(id -> roleMenuRepository.save(new RoleMenu(role.getId(), id)));
+      User holder = accounts.activeUser("menu-test-order-holder");
+      extraUserIds.add(holder.getId());
+      userRoleRepository.save(new UserRole(holder.getId(), role.getId()));
+      List<String> paths = JsonPath.read(mockMvc.perform(get("/admin/v1/me/menus").with(TestAccounts.tokenFor(holder))).andReturn().getResponse().getContentAsString(), "$.data[*].path");
+      assertThat(paths.get(0)).isEqualTo("/extra"); // "Extra" was last, now first
+      assertThat(auditActions()).contains("MENU_ORDER_UPDATED");
+    } finally {
+      reorder(Menu.CONSOLE_INSIGHTS, original).andExpect(status().isOk()); // the seeded order is shared state
+    }
+    assertThat(orderOf(Menu.CONSOLE_INSIGHTS)).containsExactlyElementsOf(original);
+  }
+
+  @Test
+  void theAdminTabsCanBeArrangedToo() throws Exception {
+    List<UUID> original = orderOf(Menu.CONSOLE_ADMIN);
+    try {
+      reorder(Menu.CONSOLE_ADMIN, reversed(original)).andExpect(status().isOk());
+      assertThat(orderOf(Menu.CONSOLE_ADMIN)).containsExactlyElementsOf(reversed(original));
+      // ...and they stay what they were: still protected, still ADMIN
+      assertThat(menuRepository.findAllById(original)).allSatisfy(m -> assertThat(m.getConsole()).isEqualTo("ADMIN"));
+    } finally {
+      reorder(Menu.CONSOLE_ADMIN, original).andExpect(status().isOk());
+    }
+    assertThat(orderOf(Menu.CONSOLE_ADMIN)).containsExactlyElementsOf(original);
+  }
+
+  @Test
+  void arrangingOneConsoleLeavesTheOtherUntouched() throws Exception {
+    List<UUID> admin = orderOf(Menu.CONSOLE_ADMIN);
+    List<UUID> insights = orderOf(Menu.CONSOLE_INSIGHTS);
+    reorder(Menu.CONSOLE_INSIGHTS, insights).andExpect(status().isOk());
+    assertThat(orderOf(Menu.CONSOLE_ADMIN)).containsExactlyElementsOf(admin);
+  }
+
+  @Test
+  void aListThatMissesAnEntryIsRefusedAndNothingChanges() throws Exception {
+    List<UUID> original = orderOf(Menu.CONSOLE_INSIGHTS);
+    reorder(Menu.CONSOLE_INSIGHTS, reversed(original).subList(1, original.size()))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error.code").value("MENU_ORDER_OUTDATED"));
+    assertThat(orderOf(Menu.CONSOLE_INSIGHTS)).containsExactlyElementsOf(original);
+  }
+
+  @Test
+  void aListWithAnUnknownEntryIsRefused() throws Exception {
+    List<UUID> withGhost = new ArrayList<>(orderOf(Menu.CONSOLE_INSIGHTS));
+    withGhost.add(UUID.randomUUID());
+    reorder(Menu.CONSOLE_INSIGHTS, withGhost).andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MENU_ORDER_OUTDATED"));
+  }
+
+  @Test
+  void anEntryOfTheOtherConsoleIsRefused() throws Exception {
+    List<UUID> mixed = new ArrayList<>(orderOf(Menu.CONSOLE_INSIGHTS));
+    mixed.add(adminMenu("admin-users").getId());
+    reorder(Menu.CONSOLE_INSIGHTS, mixed).andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MENU_ORDER_OUTDATED"));
+    // the whole admin list sent for INSIGHTS is refused too
+    reorder(Menu.CONSOLE_INSIGHTS, orderOf(Menu.CONSOLE_ADMIN)).andExpect(status().isConflict());
+  }
+
+  @Test
+  void anEntryAddedMeanwhileMakesAnOldListStale() throws Exception {
+    List<UUID> loaded = orderOf(Menu.CONSOLE_INSIGHTS); // what the screen showed
+    UUID addedByAnotherAdmin = createMenu(uniqueKey(), "Late arrival", "/late");
+
+    reorder(Menu.CONSOLE_INSIGHTS, reversed(loaded)).andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("MENU_ORDER_OUTDATED"));
+    assertThat(orderOf(Menu.CONSOLE_INSIGHTS)).contains(addedByAnotherAdmin); // not dropped
+  }
+
+  @Test
+  void duplicatesAndBadBodiesAre400() throws Exception {
+    List<UUID> original = orderOf(Menu.CONSOLE_INSIGHTS);
+    List<UUID> dup = new ArrayList<>(original);
+    dup.add(original.get(0));
+    reorder(Menu.CONSOLE_INSIGHTS, dup).andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    send(put("/admin/v1/menus/order"), "{\"console\":\"SIDEWAYS\",\"menuIds\":[]}").andExpect(status().isBadRequest());
+    send(put("/admin/v1/menus/order"), "{\"menuIds\":[]}").andExpect(status().isBadRequest());
+    send(put("/admin/v1/menus/order"), "{\"console\":\"INSIGHTS\"}").andExpect(status().isBadRequest());
+    assertThat(orderOf(Menu.CONSOLE_INSIGHTS)).containsExactlyElementsOf(original);
+  }
+
+  @Test
+  void onlyASuperAdminMayArrange() throws Exception {
+    User roleless = accounts.activeUser("menu-test-order-roleless");
+    extraUserIds.add(roleless.getId());
+    mockMvc.perform(put("/admin/v1/menus/order").with(TestAccounts.tokenFor(roleless)).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"console\":\"INSIGHTS\",\"menuIds\":[" + ids(orderOf(Menu.CONSOLE_INSIGHTS)) + "]}"))
+        .andExpect(status().isForbidden());
   }
 
   // ---- who may use it ---------------------------------------------------------------------------------
