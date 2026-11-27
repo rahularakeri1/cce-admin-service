@@ -11,6 +11,8 @@
 #
 # Usage: scripts/run-gateway-local.sh        (build the jar first: cd ../gateway-service && ./gradlew bootJar)
 #   PROTOCOL_SERVICE_URI=http://localhost:8091   where /v1/protocol/** is forwarded (Milestone 8)
+#   INSIGHTS_SERVICE_URI=http://localhost:8093   where /v1/insights/** is forwarded (Milestone 10, to test cce-insights-ui
+#                                                through the gateway the way UAT/prod run it)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,18 +35,21 @@ export LOAD_PERMISSIONS_FROM_DATABASE_ON_STARTUP="${LOAD_PERMISSIONS_FROM_DATABA
 # CORS: the gateway only accepts browser requests from ALLOWED_ORIGINS (default http://localhost:3000 plus a
 # production host). A browser sends an Origin header on every POST, even through the Vite proxy, so without the
 # admin UI's own origin here every upload/retire/POST is refused with an empty 403 BEFORE any permission check
-# (GETs still work, because browsers omit Origin on same-origin GETs, which hides the problem). :3002 is cce-admin-ui.
-export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3002}"
+# (GETs still work, because browsers omit Origin on same-origin GETs, which hides the problem). :3002 is cce-admin-ui,
+# :3001 is cce-insights-ui (which calls the gateway directly when VITE_API_BASE_URL points at it).
+export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3002}"
 
 # Protocol management (Milestone 8): the console's Protocols page calls cce-protocol-service THROUGH this
 # gateway. The jar's own application.yml routes only /admin/**, so this adds /v1/protocol/** -> the protocol
 # service (run it on 8091: 8090 is this gateway). Spring replaces a list property wholesale from the
 # highest-priority source, so BOTH routes are spelled out here, admin first, exactly as in the jar's yml.
 export PROTOCOL_SERVICE_URI="${PROTOCOL_SERVICE_URI:-http://localhost:8091}"
+export INSIGHTS_SERVICE_URI="${INSIGHTS_SERVICE_URI:-http://localhost:8093}"
 R=SPRING_CLOUD_GATEWAY_SERVER_WEBFLUX_ROUTES
 export "${R}_0_ID=admin-service" "${R}_0_URI=$ADMIN_SERVICE_URI" "${R}_0_PREDICATES_0=Path=/admin/**" "${R}_0_FILTERS_0_NAME=JwtValidationFilter"
 export "${R}_1_ID=protocol-service" "${R}_1_URI=$PROTOCOL_SERVICE_URI" "${R}_1_PREDICATES_0=Path=/v1/protocol/**" "${R}_1_FILTERS_0_NAME=JwtValidationFilter"
+export "${R}_2_ID=insights-service" "${R}_2_URI=$INSIGHTS_SERVICE_URI" "${R}_2_PREDICATES_0=Path=/v1/insights/**" "${R}_2_FILTERS_0_NAME=JwtValidationFilter"
 
 echo "Starting gateway-service on :8090 (db=$DATABASE_URL, keycloak=$KEYCLOAK_SERVER_URL realm=$KEYCLOAK_TARGET_REALM)"
-echo "Routes: /admin/** -> $ADMIN_SERVICE_URI, /v1/protocol/** -> $PROTOCOL_SERVICE_URI; CORS origins: $ALLOWED_ORIGINS"
+echo "Routes: /admin/** -> $ADMIN_SERVICE_URI, /v1/protocol/** -> $PROTOCOL_SERVICE_URI, /v1/insights/** -> $INSIGHTS_SERVICE_URI; CORS origins: $ALLOWED_ORIGINS"
 exec java -jar "$JAR"

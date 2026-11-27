@@ -180,7 +180,7 @@ gateway), against the same `ccedb`:
 cd ../cce-protocol-service && SERVER_PORT=8091 ./gradlew bootRun
 ```
 
-`PROTOCOL_SERVICE_URI` overrides where the route points. The script also sets the gateway's `ALLOWED_ORIGINS` to
+`PROTOCOL_SERVICE_URI` overrides where the route points. The script also routes `/v1/insights/**` to the insights service (`INSIGHTS_SERVICE_URI`, default `http://localhost:8093`) and allows the Insights UI's origin `:3001`, so `cce-insights-ui` can be tested **through the gateway the way UAT and production run it** (set `VITE_API_BASE_URL=http://localhost:8090` in its `.env.local`): the gateway then checks the user's token and the role's permission rows. A role needs `GET /admin/v1/me` and `GET /admin/v1/me/menus` for the sidebar, and a row covering `/v1/insights/**` (a single `*` matches one path level only) for the data pages. The script also sets the gateway's `ALLOWED_ORIGINS` to
 `http://localhost:3000,http://localhost:3002` (override with the env var): a browser sends `Origin` on every `POST`,
 and without the admin UI's `:3002` in that list upload and retire fail with an empty `403` while list and detail
 still work. After V5 has run (start this service once), **run the
