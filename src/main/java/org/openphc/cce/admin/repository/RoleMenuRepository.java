@@ -13,6 +13,8 @@ public interface RoleMenuRepository extends JpaRepository<RoleMenu, RoleMenuId> 
 
   List<RoleMenu> findAllByRoleIdIn(Collection<UUID> roleIds);
 
+  long countByMenuId(UUID menuId);
+
   void deleteAllByRoleId(UUID roleId);
 
   void deleteAllByMenuId(UUID menuId);

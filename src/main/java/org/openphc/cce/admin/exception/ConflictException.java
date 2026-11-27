@@ -82,6 +82,19 @@ public class ConflictException extends ApiException {
         String.join(", ", labels) + " can only be assigned to SUPER_ADMIN, not to " + roleName);
   }
 
+  public static ConflictException menuKeyImmutable(String key) {
+    return new ConflictException(
+        "MENU_KEY_IMMUTABLE",
+        "A menu's key can't be changed (roles and code refer to it by key); it is " + key);
+  }
+
+  public static ConflictException adminMenuProtected(String label, String what) {
+    return new ConflictException(
+        "ADMIN_MENU_PROTECTED",
+        "The admin console's own tab \"" + label + "\" is protected: " + what
+            + " — the console builds its sidebar from it, and it would lock everyone out");
+  }
+
   public static ConflictException systemRoleImmutable(String name) {
     return new ConflictException("SYSTEM_ROLE_IMMUTABLE", "System role cannot be modified or deleted: " + name);
   }
