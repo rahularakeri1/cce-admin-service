@@ -129,7 +129,7 @@ catalog — no parent/child nesting.
 | `path` | `VARCHAR(255)` | No | — | Route path in the console |
 | `icon` | `VARCHAR(100)` | Yes | — | Icon identifier (console-specific, e.g. a Heroicons name) |
 | `console` | `VARCHAR(20)` | No | `'INSIGHTS'` | Which console shows it: `INSIGHTS` (`cce-insights-ui`) or `ADMIN` (this console's own tabs). `CHECK` constraint `ck_menus_console`. Added by V4 |
-| `sort_order` | `INTEGER` | No | `0` | Ordering among menus |
+| `sort_order` | `INTEGER` | No | `0` | Position among the menus **of the same `console`**, ascending. `PUT /menus/order` (the Menus screen's drag-and-drop) renumbers a console to `1..n`; a menu created without one goes to the end (one past the current last). Equal values fall back to `label` |
 | `is_active` | `BOOLEAN` | No | `true` | Inactive menus are excluded from `GET /me/menus` (B-21) |
 | `created_at` | `TIMESTAMPTZ` | No | `now()` | — |
 | `updated_at` | `TIMESTAMPTZ` | No | `now()` | — |
@@ -303,6 +303,7 @@ exhaustive — any future mutating endpoint needs its own value here.
 | `ROLE_MENUS_UPDATED` | `PUT /roles/:id/menus` (B-41) |
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/:id/permissions` (B-42) |
 | `MENU_CREATED` / `MENU_UPDATED` / `MENU_DELETED` | `/menus` CRUD (B-44). `MENU_DELETED`'s `before` is `{ menu, roleAssignmentsRemoved }` |
+| `MENU_ORDER_UPDATED` | `PUT /menus/order`. `entity_id` is the console (`INSIGHTS` / `ADMIN`); `before` / `after` are `{ console, menuIds }` in the old and new order |
 
 ---
 
