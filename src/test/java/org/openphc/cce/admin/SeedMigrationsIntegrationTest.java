@@ -30,10 +30,14 @@ class SeedMigrationsIntegrationTest {
   }
 
   @Test
-  void v4LeftSevenInsightsMenusAndFourAdminTabsAllLinkedToSuperAdmin() {
-    assertThat(jdbc.queryForObject("select count(*) from menus where console = 'INSIGHTS'", Integer.class)).isEqualTo(7);
-    assertThat(jdbc.queryForList("select menu_key from menus where console = 'ADMIN' order by sort_order", String.class))
-        .containsExactly("admin-users", "admin-roles", "admin-menus", "admin-protocols");
+  void v4LeftTheSevenInsightsMenusAndFourAdminTabsAllLinkedToSuperAdmin() {
+    // The seeded entries must still be there under the right console. Not "exactly seven": admins can add their own
+    // insights menus from the Menus screen, and may arrange any of them, and this runs against the shared local ccedb.
+    assertThat(jdbc.queryForList("select menu_key from menus where console = 'INSIGHTS'", String.class))
+        .contains("dashboard", "facilities", "compliance", "deviations", "patients", "events", "ingestion");
+    // The admin tabs only ever come from a migration, so that set IS exact (in any order: they can be arranged too).
+    assertThat(jdbc.queryForList("select menu_key from menus where console = 'ADMIN'", String.class))
+        .containsExactlyInAnyOrder("admin-users", "admin-roles", "admin-menus", "admin-protocols");
     assertThat(
             jdbc.queryForObject(
                 "select count(*) from role_menus rm join roles r on r.id = rm.role_id join menus m on m.id = rm.menu_id"
