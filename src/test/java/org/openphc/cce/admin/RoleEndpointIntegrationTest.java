@@ -410,19 +410,34 @@ class RoleEndpointIntegrationTest {
   }
 
   @Test
-  void menuCatalogListsTheSevenInsightsMenusThenTheFourAdminTabsWithTheirConsole() throws Exception {
-    mockMvc
-        .perform(get("/admin/v1/menus").with(token()))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(11))
-        .andExpect(jsonPath("$.data[0].menuKey").value("dashboard"))
-        .andExpect(jsonPath("$.data[0].console").value("INSIGHTS"))
-        .andExpect(jsonPath("$.data[0].isActive").value(true))
-        .andExpect(jsonPath("$.data[6].menuKey").value("ingestion"))
-        .andExpect(jsonPath("$.data[7].menuKey").value("admin-users"))
-        .andExpect(jsonPath("$.data[7].console").value("ADMIN"))
-        .andExpect(jsonPath("$.data[10].menuKey").value("admin-protocols"))
-        .andExpect(jsonPath("$.data[*].menuKey").value(not(hasItem("nope"))));
+  void menuCatalogListsTheSeededMenusInsightsFirstThenTheAdminTabsEachWithItsConsole() throws Exception {
+    // The catalog is shared and editable (menus can be added, deactivated and arranged), so this checks what must always
+    // hold instead of an exact size or order: every seeded entry is present under the right console, the insights
+    // entries all come before the admin tabs, and each console is listed by position.
+    String body =
+        mockMvc.perform(get("/admin/v1/menus").with(token())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+    List<String> keys = JsonPath.read(body, "$.data[*].menuKey");
+    List<String> consoles = JsonPath.read(body, "$.data[*].console");
+    List<Integer> positions = JsonPath.read(body, "$.data[*].sortOrder");
+
+    assertThat(keys).contains("dashboard", "facilities", "compliance", "deviations", "patients", "events", "ingestion");
+    assertThat(keys).contains("admin-users", "admin-roles", "admin-menus", "admin-protocols");
+    assertThat(keys).doesNotContain("nope");
+    for (String key : List.of("dashboard", "events", "ingestion")) {
+      assertThat(consoles.get(keys.indexOf(key))).isEqualTo("INSIGHTS");
+    }
+    for (String key : List.of("admin-users", "admin-roles", "admin-menus", "admin-protocols")) {
+      assertThat(consoles.get(keys.indexOf(key))).isEqualTo("ADMIN");
+    }
+    assertThat(consoles.lastIndexOf("INSIGHTS")).isLessThan(consoles.indexOf("ADMIN")); // insights first, then admin
+    for (String console : List.of("INSIGHTS", "ADMIN")) {
+      List<Integer> inGroup = new ArrayList<>();
+      for (int i = 0; i < consoles.size(); i++) {
+        if (consoles.get(i).equals(console)) inGroup.add(positions.get(i));
+      }
+      assertThat(inGroup).isSorted(); // each console is listed by position
+    }
+    assertThat(JsonPath.<List<Boolean>>read(body, "$.data[?(@.menuKey=='dashboard')].isActive")).isNotEmpty();
   }
 
   // ---- admin tab rules (Milestone 7) ------------------------------------------------------------

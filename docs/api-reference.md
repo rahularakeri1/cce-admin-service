@@ -39,6 +39,8 @@ Error:
 | 403 | `FORBIDDEN` | Role lacks permission, or local account not `ACTIVE` |
 | 404 | `USER_NOT_FOUND` / `ROLE_NOT_FOUND` / `MENU_NOT_FOUND` | Unknown id |
 | 409 | `DUPLICATE_ROLE_NAME` / `DUPLICATE_MENU_KEY` / `EMAIL_IN_USE` | Unique constraint conflict |
+| 409 | `MENU_KEY_IMMUTABLE` / `ADMIN_MENU_PROTECTED` | A menu's key changed, or a protected admin tab deleted, deactivated or moved — see [Menus](#menus) |
+| 409 | `ADMIN_MENU_REQUIRED` / `ADMIN_MENU_SUPER_ADMIN_ONLY` | A role's menu set breaks the admin tab rules — see `PUT /roles/:id/menus` |
 | 409 | `ROLE_IN_USE` | Delete of a role still assigned to users |
 | 409 | `SYSTEM_ROLE_IMMUTABLE` | Modify or delete of an `is_system` role |
 | 502 | `KEYCLOAK_SYNC_FAILED` | Keycloak or gateway sync call failed; local state is partially applied — see [architecture-overview.md §7](architecture-overview.md#7-consistency-model) |
@@ -492,21 +494,45 @@ insights menus first, then the admin console's tabs (each by `sort_order`, then 
 Flat list — no nesting. Each entry: `{ id, menuKey, label, path, icon, console, sortOrder, isActive }`, where
 `console` is `INSIGHTS` or `ADMIN`.
 
-> **Milestone note:** only `GET` exists so far (Milestone 3 — the Role Detail → Menus tab needs the
-> catalog). `POST` / `PUT` / `DELETE` below arrive with Milestone 9 (Menus Catalog), which must also protect the four `ADMIN` entries.
+`POST` creates and `PUT /:id` updates; both take the same body and answer `{ "data": <the entry> }` (`201` / `200`):
 
-`POST` / `PUT`:
 ```json
-{ "menuKey": "compliance", "label": "Compliance",
-  "path": "/compliance", "icon": "ClipboardDocumentCheckIcon", "sortOrder": 10, "isActive": true }
+{ "menuKey": "reports", "label": "Reports",
+  "path": "/reports", "icon": "ChartBarIcon", "sortOrder": 8, "isActive": true }
 ```
 
-| Status | Cause |
+| Field | Rule |
 |---|---|
-| `409` | `DUPLICATE_MENU_KEY` |
+| `menuKey` | Required, up to 100 chars: lower-case letters, digits, `-` or `_`, starting with a letter or digit (`reports`, `admin-audit`). **Permanent**: on `PUT` it must equal the existing key |
+| `label` | Required, up to 150 chars — what the sidebar shows |
+| `path` | Required, up to 255 chars, starts with `/` |
+| `icon` | Optional, up to 100 chars (a Heroicons name); blank is stored as none |
+| `sortOrder` | Optional, `>= 0`. Missing: `0` on create, **unchanged** on update |
+| `isActive` | Optional. Missing: `true` on create, **unchanged** on update. `false` is "deactivate" |
+| `console` | **Ignored** if sent. New entries are always `INSIGHTS` (an admin tab needs a screen built in code, so those come from migrations); an existing entry's console never changes |
 
-`DELETE` also removes the menu's `role_menus` rows (not the roles themselves). `404 MENU_NOT_FOUND`
-for an unknown id.
+| Status | Code | Cause |
+|---|---|---|
+| `400` | `VALIDATION_ERROR` | A field above is invalid |
+| `404` | `MENU_NOT_FOUND` | Unknown id (`PUT`, `DELETE`) |
+| `409` | `DUPLICATE_MENU_KEY` | `POST` with a key that exists (also if two admins race: the unique constraint decides) |
+| `409` | `MENU_KEY_IMMUTABLE` | `PUT` with a different `menuKey` — roles and code refer to an entry by key |
+| `409` | `ADMIN_MENU_PROTECTED` | See below |
+
+**The four admin console tabs are protected** (Users, Roles, Menus, Protocols — every entry whose `console` is
+`ADMIN`). This console builds its own sidebar from them, so removing or hiding one would lock everyone out of a
+screen with no way back short of editing the database. For these entries `DELETE` is `409 ADMIN_MENU_PROTECTED`,
+`PUT` with `isActive: false` is `409 ADMIN_MENU_PROTECTED`, and `PUT` with a different `path` is `409
+ADMIN_MENU_PROTECTED`. Their **label, icon and sort order stay editable**.
+
+**Deactivate vs delete.** Deactivating (`PUT` with `isActive: false`) keeps the entry in the catalog and **keeps its
+role assignments**: it simply stops appearing in `GET /me/menus` for everyone, and activating it again restores it
+for the same roles. `DELETE` is permanent and removes the entry **and exactly its own `role_menus` rows** — every
+role that held it loses it, nothing else changes, the roles themselves stay (`204`).
+
+Audits `MENU_CREATED` / `MENU_UPDATED` (before/after) and `MENU_DELETED` (the entry plus
+`roleAssignmentsRemoved`, how many roles lost it). Like everything under `/admin/v1` except `/me` and `/health`,
+these need `SUPER_ADMIN`.
 
 ---
 
