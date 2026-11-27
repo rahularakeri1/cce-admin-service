@@ -467,7 +467,7 @@ the gateway sync once so the gateway reloads its rules.
 |---|---|---|
 | Q1 | **Protocol audit** — who uploaded or retired what, and where it is stored: the shared `admin_audit_log` (needs a nullable actor and a start-up-order answer), a table inside `cce-protocol-service`, or elsewhere. | Until decided, only the protocol service's application log records it. The gateway already forwards `X-User-Name` after validating the token. |
 | Q2 | **Token check in the protocol service, and a network policy** so only the gateway can call it. | Today no CCE backend except the gateway and this service checks a token, and any pod in the cluster's namespace can call the protocol service directly. Platform convention for now. |
-| Q3 | **Production role claim path.** The production gateway reads `resource_access.gateway-service.roles` (client roles); this console assigns *realm* roles and the gateway's sync creates realm roles. | Confirmed by the production handover and the Kubernetes config. Resolve before go-live; Milestone 10 should include a run in client-role mode. Milestone 7's database-role check does not depend on it, but the gateway layer does. |
+| Q3 | **Production role claim path.** The production gateway reads `resource_access.gateway-service.roles` (client roles); this console assigns *realm* roles and the gateway's sync creates realm roles. | Confirmed by the production handover and the Kubernetes config. Resolve before go-live; Milestone 11 (End-to-End) should include a run in client-role mode. Milestone 7's database-role check does not depend on it, but the gateway layer does. |
 | Q4 | **Existing production users.** People onboarded by `onboard-insights-user.sh` exist in Keycloak but not in this service's `users` table. | They would be unknown to the Users list, and creating one with the same email answers "already in use". |
 | Q5 | **Kubernetes.** The deployment files have no admin-service route or ingress, and the gateway's built-in `/admin/**` route may be overwritten by the numbered route environment variables. | Checked in Milestone 11. |
 | Q6 | **Can a retired protocol be un-retired?** The protocol API shows no such call. | Confirm when building the Retire button. |
@@ -475,3 +475,20 @@ the gateway sync once so the gateway reloads its rules.
 *Resolved:* production email. The handover states SMTP (Office 365, sender `CCERwanda@medtroniclabs.org`) is
 already configured on the `cce` realm in production and UAT, with 72-hour links — the same as this service
 requests. Only the mailbox credentials need to stay valid.
+
+### 9.11 Planned (Milestone 10) — role-aware Insights sidebar
+
+> **Planned — Milestone 10. Not implemented yet;** this is the agreed design, written first (docs-first). The code is in the `cce-insights-ui` repository; **nothing in this service changes.**
+
+Today only `cce-admin-ui` builds its sidebar from the menu catalog. `cce-insights-ui`'s sidebar is a fixed list in its own code, so what an admin ticks on a role's Menus tab has no visible effect there. Milestone 10 makes Insights the second consumer:
+
+1. The user signs in to Insights through Keycloak (the login already exists; it is off only in local development).
+2. Insights calls `GET /admin/v1/me/menus?console=INSIGHTS` with that token, through the gateway (`/admin/**` is routed to this service).
+3. The sidebar is drawn from the answer (labels, saved icons, saved order) and a page the user has no menu for redirects to their first allowed one. This is the *soft* control: the data endpoints behind Insights are still protected by gateway permission rows.
+
+**What this relies on, and where it can go wrong**
+- The token's `email` must match a `users` row, else `403`: people onboarded outside this console get no menus (Q4).
+- Every role that should use Insights needs the two gateway rows `GET /admin/v1/me` and `GET /admin/v1/me/menus` (the same rows a custom role needs for this console).
+- The deployment must route `/admin/**` from the Insights origin to the gateway (Q5), and the gateway's `ALLOWED_ORIGINS` must list the Insights origin.
+- Menu paths in the catalog are the paths Insights routes on; an `INSIGHTS` menu whose path Insights has no page for is simply not shown there.
+
