@@ -72,6 +72,12 @@ public class ConflictException extends ApiException {
         "SUPER_ADMIN must keep every admin console tab; missing: " + String.join(", ", labels));
   }
 
+  public static ConflictException superAdminMenuRequired(java.util.List<String> labels) {
+    return new ConflictException(
+        "SUPER_ADMIN_MENU_REQUIRED",
+        "SUPER_ADMIN must keep every menu; missing: " + String.join(", ", labels));
+  }
+
   public static ConflictException adminMenuSuperAdminOnly(java.util.List<String> labels, String roleName) {
     return new ConflictException(
         "ADMIN_MENU_SUPER_ADMIN_ONLY",
