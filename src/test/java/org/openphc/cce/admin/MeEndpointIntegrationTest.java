@@ -98,16 +98,17 @@ class MeEndpointIntegrationTest {
   }
 
   @Test
-  void meMenusReturnsAllSevenSeededMenusInSidebarOrder() throws Exception {
+  void meMenusReturnsTheSevenSeededMenus() throws Exception {
+    // Not their order or the catalog's size: admins arrange the menus and may add their own, and this runs against the
+    // shared local database. What must hold is that SUPER_ADMIN holds the seven seeded insights menus, and only insights.
     mockMvc
         .perform(get("/admin/v1/me/menus").with(token(user.getEmail(), Instant.now())))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(7))
-        .andExpect(jsonPath("$.data[0].label").value("Dashboard"))
-        .andExpect(jsonPath("$.data[0].path").value("/"))
-        .andExpect(jsonPath("$.data[1].label").value("Facilities"))
-        .andExpect(jsonPath("$.data[4].path").value("/compliance/patients"))
-        .andExpect(jsonPath("$.data[6].label").value("Ingestion"));
+        .andExpect(
+            jsonPath("$.data[*].label")
+                .value(org.hamcrest.Matchers.hasItems("Dashboard", "Facilities", "Compliance", "Deviations", "Patients", "Events", "Ingestion")))
+        .andExpect(jsonPath("$.data[*].path").value(org.hamcrest.Matchers.hasItems("/", "/compliance/patients")))
+        .andExpect(jsonPath("$.data[*].path").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.hasItem("/users"))));
   }
 
   @Test
@@ -115,12 +116,9 @@ class MeEndpointIntegrationTest {
     mockMvc
         .perform(get("/admin/v1/me/menus").param("console", "ADMIN").with(token(user.getEmail(), Instant.now())))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(4))
-        .andExpect(jsonPath("$.data[0].label").value("Users"))
-        .andExpect(jsonPath("$.data[0].path").value("/users"))
-        .andExpect(jsonPath("$.data[1].path").value("/roles"))
-        .andExpect(jsonPath("$.data[2].path").value("/menus"))
-        .andExpect(jsonPath("$.data[3].path").value("/protocols"));
+        .andExpect(jsonPath("$.data.length()").value(4)) // the admin tabs only ever come from a migration
+        .andExpect(jsonPath("$.data[*].path").value(org.hamcrest.Matchers.containsInAnyOrder("/users", "/roles", "/menus", "/protocols")))
+        .andExpect(jsonPath("$.data[*].label").value(org.hamcrest.Matchers.containsInAnyOrder("Users", "Roles", "Menus", "Protocols")));
   }
 
   @Test
@@ -128,7 +126,7 @@ class MeEndpointIntegrationTest {
     mockMvc
         .perform(get("/admin/v1/me/menus").param("console", "INSIGHTS").with(token(user.getEmail(), Instant.now())))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.length()").value(7));
+        .andExpect(jsonPath("$.data[*].label").value(org.hamcrest.Matchers.hasItems("Dashboard", "Ingestion")));
   }
 
   @Test
