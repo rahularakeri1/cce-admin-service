@@ -7,6 +7,7 @@ import java.util.UUID;
 import org.openphc.cce.admin.dto.ApiResponse;
 import org.openphc.cce.admin.dto.MenuRequest;
 import org.openphc.cce.admin.dto.MenuResponse;
+import org.openphc.cce.admin.dto.ReorderMenusRequest;
 import org.openphc.cce.admin.security.CurrentUserProvider;
 import org.openphc.cce.admin.service.MenuService;
 import org.springframework.http.HttpStatus;
@@ -45,6 +46,12 @@ public class MenuController {
   @ResponseStatus(HttpStatus.CREATED)
   public ApiResponse<MenuResponse> create(@Valid @RequestBody MenuRequest body, HttpServletRequest request) {
     return ApiResponse.of(menuService.create(body, currentUser.get().id(), request.getRemoteAddr()));
+  }
+
+  /** Arranges one console's entries (docs/api-reference.md → Menus). A literal path wins over /{id}, so "order" is never an id. */
+  @PutMapping("/order")
+  public ApiResponse<List<MenuResponse>> reorder(@Valid @RequestBody ReorderMenusRequest body, HttpServletRequest request) {
+    return ApiResponse.of(menuService.reorder(body.console(), body.menuIds(), currentUser.get().id(), request.getRemoteAddr()));
   }
 
   @PutMapping("/{id}")

@@ -40,7 +40,7 @@ Error:
 | 404 | `USER_NOT_FOUND` / `ROLE_NOT_FOUND` / `MENU_NOT_FOUND` | Unknown id |
 | 409 | `DUPLICATE_ROLE_NAME` / `DUPLICATE_MENU_KEY` / `EMAIL_IN_USE` | Unique constraint conflict |
 | 409 | `MENU_KEY_IMMUTABLE` / `ADMIN_MENU_PROTECTED` | A menu's key changed, or a protected admin tab deleted, deactivated or moved — see [Menus](#menus) |
-| 409 | `MENU_ORDER_OUTDATED` *(planned, 9b)* | `PUT /menus/order` with a list that is no longer that console's exact set of entries — see [Menus](#menus) |
+| 409 | `MENU_ORDER_OUTDATED` | `PUT /menus/order` with a list that is no longer that console's exact set of entries — see [Menus](#menus) |
 | 409 | `ADMIN_MENU_REQUIRED` / `ADMIN_MENU_SUPER_ADMIN_ONLY` | A role's menu set breaks the admin tab rules — see `PUT /roles/:id/menus` |
 | 409 | `ROLE_IN_USE` | Delete of a role still assigned to users |
 | 409 | `SYSTEM_ROLE_IMMUTABLE` | Modify or delete of an `is_system` role |
@@ -509,7 +509,7 @@ Flat list — no nesting. Each entry: `{ id, menuKey, label, path, icon, console
 | `label` | Required, up to 150 chars — what the sidebar shows |
 | `path` | Required, up to 255 chars, starts with `/` |
 | `icon` | Optional, up to 100 chars (a Heroicons name); blank is stored as none |
-| `sortOrder` | Optional, `>= 0`. Missing: `0` on create (**planned, Milestone 9b:** the end of that console's list, one past the current last), **unchanged** on update. From 9b the console arranges entries with `PUT /menus/order` below and no longer sends it |
+| `sortOrder` | Optional, `>= 0`. Missing: **the end of that console's list** on create (one past the current last), **unchanged** on update. The console arranges entries with `PUT /menus/order` below and no longer sends it |
 | `isActive` | Optional. Missing: `true` on create, **unchanged** on update. `false` is "deactivate" |
 | `console` | **Ignored** if sent. New entries are always `INSIGHTS` (an admin tab needs a screen built in code, so those come from migrations); an existing entry's console never changes |
 
@@ -526,8 +526,6 @@ Flat list — no nesting. Each entry: `{ id, menuKey, label, path, icon, console
 screen with no way back short of editing the database. For these entries `DELETE` is `409 ADMIN_MENU_PROTECTED`,
 `PUT` with `isActive: false` is `409 ADMIN_MENU_PROTECTED`, and `PUT` with a different `path` is `409
 ADMIN_MENU_PROTECTED`. Their **label, icon and sort order stay editable**.
-
-> **Planned — Milestone 9b. Not implemented yet;** this is the agreed design, written first (docs-first). `PUT /admin/v1/menus/order`, its errors, the `MENU_ORDER_UPDATED` audit and the end-of-list default for a new entry arrive with the code PR.
 
 **Arranging: `PUT /admin/v1/menus/order`.** Sets the order of **one console's** entries in a single call — what the
 Menus screen's drag-and-drop saves. The body is the **complete** ordered list for that console, never a partial move:
