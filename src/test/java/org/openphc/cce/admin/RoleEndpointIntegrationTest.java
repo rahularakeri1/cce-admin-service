@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.admin.client.GatewaySyncClient;
 import org.openphc.cce.admin.entity.Menu;
+import org.openphc.cce.admin.entity.RoleMenu;
 import org.openphc.cce.admin.entity.Role;
 import org.openphc.cce.admin.entity.User;
 import org.openphc.cce.admin.entity.UserRole;
@@ -489,16 +490,26 @@ class RoleEndpointIntegrationTest {
   }
 
   @Test
-  void superAdminKeepsItsAdminTabsWhenInsightsMenusChange() throws Exception {
-    List<UUID> admin = menuRepository.findAllByConsoleOrderBySortOrderAsc(Menu.CONSOLE_ADMIN).stream().map(Menu::getId).toList();
-    List<UUID> before =
-        roleMenuRepository.findAllByRoleId(superAdminId()).stream().map(rm -> rm.getMenuId()).toList();
+  void superAdminCannotLoseAnInsightsMenuEither() throws Exception {
+    List<UUID> all = menuRepository.findAll().stream().map(Menu::getId).toList();
+    List<UUID> before = roleMenuRepository.findAllByRoleId(superAdminId()).stream().map(rm -> rm.getMenuId()).toList();
     try {
-      List<UUID> reduced = new ArrayList<>(admin);
-      reduced.addAll(seededMenuIds(2));
-      putMenus(superAdminId(), reduced).andExpect(status().isOk()).andExpect(jsonPath("$.data.menuIds.length()").value(6));
+      // the whole catalog is allowed (and is what the UI always sends)
+      putMenus(superAdminId(), all).andExpect(status().isOk()).andExpect(jsonPath("$.data.menuIds.length()").value(all.size()));
+
+      // the four admin tabs alone are no longer enough: every insights menu must stay
+      List<UUID> adminOnly = menuRepository.findAllByConsoleOrderBySortOrderAsc(Menu.CONSOLE_ADMIN).stream().map(Menu::getId).toList();
+      putMenus(superAdminId(), adminOnly).andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("SUPER_ADMIN_MENU_REQUIRED"));
+
+      // one insights menu missing is refused, and nothing changes
+      List<UUID> withoutOne = new ArrayList<>(all);
+      withoutOne.remove(seededMenuIds(1).get(0));
+      putMenus(superAdminId(), withoutOne).andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("SUPER_ADMIN_MENU_REQUIRED"));
+      assertThat(roleMenuRepository.findAllByRoleId(superAdminId())).hasSize(all.size());
     } finally {
-      putMenus(superAdminId(), before).andExpect(status().isOk()); // the seeded SUPER_ADMIN is shared state
+      // restore: the seeded SUPER_ADMIN is shared state, whatever it held before this test
+      List<RoleMenu> rows = roleMenuRepository.findAllByRoleId(superAdminId());
+      roleMenuRepository.deleteAll(rows.stream().filter(rm -> !before.contains(rm.getMenuId())).toList());
     }
   }
 

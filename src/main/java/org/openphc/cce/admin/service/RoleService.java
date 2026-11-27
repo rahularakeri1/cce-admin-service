@@ -195,7 +195,7 @@ public class RoleService {
 
   /**
    * The admin console's own tabs are menu entries, so the menus screen could lock people out of it:
-   * SUPER_ADMIN must keep all four, and the three management tabs (Users, Roles, Menus) belong to
+   * SUPER_ADMIN must keep all four (and, as the role that sees everything, every other menu too), and the three management tabs (Users, Roles, Menus) belong to
    * SUPER_ADMIN alone — the service refuses those endpoints to any other role anyway (docs/api-reference.md).
    */
   private void enforceAdminTabRules(Role role, Set<UUID> wanted, Map<UUID, Menu> requested) {
@@ -207,6 +207,12 @@ public class RoleService {
               .toList();
       if (!missing.isEmpty()) {
         throw ConflictException.adminMenuRequired(missing);
+      }
+      // SUPER_ADMIN sees everything: the whole catalog, so no page can be hidden from every SUPER_ADMIN by accident.
+      List<String> missingOthers =
+          menuRepository.findAll().stream().filter(m -> !wanted.contains(m.getId())).map(Menu::getLabel).sorted().toList();
+      if (!missingOthers.isEmpty()) {
+        throw ConflictException.superAdminMenuRequired(missingOthers);
       }
       return;
     }
