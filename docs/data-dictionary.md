@@ -146,7 +146,11 @@ catalog — no parent/child nesting.
 | `idx_menus_console` | `console` | Per-console menu lookups (V4) |
 
 Deleting a menu also removes its `role_menus` rows (B-44) — a hard delete of the join, not of the
-role or a soft-deactivation of the mapping.
+role or a soft-deactivation of the mapping. **Business rules, not database constraints** (`MenuService`): a menu's
+`menu_key` never changes after creation; entries created through the API are always `INSIGHTS`; and the four `ADMIN`
+entries cannot be deleted, deactivated or have their `path` changed (`409 ADMIN_MENU_PROTECTED`) — the admin console's
+own sidebar is built from them. Deactivating (`is_active = false`) keeps the `role_menus` rows; only a delete removes
+them.
 
 ---
 
@@ -298,7 +302,7 @@ exhaustive — any future mutating endpoint needs its own value here.
 | `ROLE_DELETED` | `DELETE /roles/:id` |
 | `ROLE_MENUS_UPDATED` | `PUT /roles/:id/menus` (B-41) |
 | `ROLE_PERMISSIONS_UPDATED` | `PUT /roles/:id/permissions` (B-42) |
-| `MENU_CREATED` / `MENU_UPDATED` / `MENU_DELETED` | `/menus` CRUD (B-44) |
+| `MENU_CREATED` / `MENU_UPDATED` / `MENU_DELETED` | `/menus` CRUD (B-44). `MENU_DELETED`'s `before` is `{ menu, roleAssignmentsRemoved }` |
 
 ---
 
