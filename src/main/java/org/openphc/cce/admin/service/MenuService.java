@@ -1,9 +1,12 @@
 package org.openphc.cce.admin.service;
 
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.openphc.cce.admin.audit.AuditAction;
 import org.openphc.cce.admin.audit.AuditLogWriter;
 import org.openphc.cce.admin.dto.MenuRequest;
@@ -11,6 +14,7 @@ import org.openphc.cce.admin.dto.MenuResponse;
 import org.openphc.cce.admin.entity.Menu;
 import org.openphc.cce.admin.exception.ConflictException;
 import org.openphc.cce.admin.exception.NotFoundException;
+import org.openphc.cce.admin.exception.ValidationException;
 import org.openphc.cce.admin.repository.MenuRepository;
 import org.openphc.cce.admin.repository.RoleMenuRepository;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -59,7 +63,9 @@ public class MenuService {
     menu.setMenuKey(key);
     menu.setConsole(Menu.CONSOLE_INSIGHTS); // admin tabs need code behind them: migrations only
     apply(menu, request);
-    menu.setSortOrder(request.sortOrder() != null ? request.sortOrder() : 0);
+    // No explicit position: the end of the list, so a new entry never jumps in front of the arrangement.
+    menu.setSortOrder(
+        request.sortOrder() != null ? request.sortOrder() : menuRepository.maxSortOrder(Menu.CONSOLE_INSIGHTS) + 1);
     menu.setActive(request.isActive() == null || request.isActive());
 
     Menu saved;
@@ -99,6 +105,41 @@ public class MenuService {
     MenuResponse after = MenuResponse.from(menuRepository.saveAndFlush(menu));
     auditLogWriter.write(actorId, AuditAction.MENU_UPDATED, ENTITY_TYPE, id.toString(), before, after, ip);
     return after;
+  }
+
+  /**
+   * Arranges ONE console's entries. {@code requested} must be exactly that console's current set of ids: if another
+   * admin added or deleted an entry while this one was dragging, the call is refused ({@code MENU_ORDER_OUTDATED}) and
+   * nothing changes, so an entry is never silently dropped or put at a stale position. The positions become 1..n in the
+   * order given, in one transaction. The admin console's own tabs can be arranged too (it only changes the order of its
+   * sidebar); the protection rules are about delete, deactivate and path, not order.
+   */
+  @Transactional
+  public List<MenuResponse> reorder(String console, List<UUID> requested, UUID actorId, String ip) {
+    if (new HashSet<>(requested).size() != requested.size()) {
+      throw new ValidationException("menuIds must not contain the same id twice");
+    }
+    Comparator<Menu> byPosition = Comparator.comparingInt(Menu::getSortOrder).thenComparing(Menu::getLabel);
+    List<Menu> current = menuRepository.findAllByConsoleOrderBySortOrderAsc(console).stream().sorted(byPosition).toList();
+    if (!current.stream().map(Menu::getId).collect(Collectors.toSet()).equals(new HashSet<>(requested))) {
+      throw ConflictException.menuOrderOutdated(console);
+    }
+
+    Map<UUID, Menu> byId = current.stream().collect(Collectors.toMap(Menu::getId, m -> m));
+    for (int i = 0; i < requested.size(); i++) {
+      byId.get(requested.get(i)).setSortOrder(i + 1);
+    }
+    menuRepository.saveAll(current);
+    menuRepository.flush();
+
+    Map<String, Object> before = new LinkedHashMap<>();
+    before.put("console", console);
+    before.put("menuIds", current.stream().map(Menu::getId).toList());
+    Map<String, Object> after = new LinkedHashMap<>();
+    after.put("console", console);
+    after.put("menuIds", requested);
+    auditLogWriter.write(actorId, AuditAction.MENU_ORDER_UPDATED, ENTITY_TYPE, console, before, after, ip);
+    return list();
   }
 
   /**
