@@ -40,6 +40,7 @@ Error:
 | 404 | `USER_NOT_FOUND` / `ROLE_NOT_FOUND` / `MENU_NOT_FOUND` | Unknown id |
 | 409 | `DUPLICATE_ROLE_NAME` / `DUPLICATE_MENU_KEY` / `EMAIL_IN_USE` | Unique constraint conflict |
 | 409 | `MENU_KEY_IMMUTABLE` / `ADMIN_MENU_PROTECTED` | A menu's key changed, or a protected admin tab deleted, deactivated or moved — see [Menus](#menus) |
+| 409 | `MENU_ORDER_OUTDATED` *(planned, 9b)* | `PUT /menus/order` with a list that is no longer that console's exact set of entries — see [Menus](#menus) |
 | 409 | `ADMIN_MENU_REQUIRED` / `ADMIN_MENU_SUPER_ADMIN_ONLY` | A role's menu set breaks the admin tab rules — see `PUT /roles/:id/menus` |
 | 409 | `ROLE_IN_USE` | Delete of a role still assigned to users |
 | 409 | `SYSTEM_ROLE_IMMUTABLE` | Modify or delete of an `is_system` role |
@@ -487,6 +488,7 @@ API does not expose one: `syncStatus` appears only on a response that follows a 
 | `GET` | `/` | Full catalog |
 | `POST` | `/` | Create |
 | `PUT` | `/:id` | Update |
+| `PUT` | `/order` | Arrange the entries of one console (drag and drop in the UI) |
 | `DELETE` | `/:id` | Delete |
 
 `GET` returns the complete catalog (not filtered by caller's roles — that's `GET /me/menus`), ordered
@@ -498,7 +500,7 @@ Flat list — no nesting. Each entry: `{ id, menuKey, label, path, icon, console
 
 ```json
 { "menuKey": "reports", "label": "Reports",
-  "path": "/reports", "icon": "ChartBarIcon", "sortOrder": 8, "isActive": true }
+  "path": "/reports", "icon": "ChartBarIcon", "isActive": true }
 ```
 
 | Field | Rule |
@@ -507,7 +509,7 @@ Flat list — no nesting. Each entry: `{ id, menuKey, label, path, icon, console
 | `label` | Required, up to 150 chars — what the sidebar shows |
 | `path` | Required, up to 255 chars, starts with `/` |
 | `icon` | Optional, up to 100 chars (a Heroicons name); blank is stored as none |
-| `sortOrder` | Optional, `>= 0`. Missing: `0` on create, **unchanged** on update |
+| `sortOrder` | Optional, `>= 0`. Missing: `0` on create (**planned, Milestone 9b:** the end of that console's list, one past the current last), **unchanged** on update. From 9b the console arranges entries with `PUT /menus/order` below and no longer sends it |
 | `isActive` | Optional. Missing: `true` on create, **unchanged** on update. `false` is "deactivate" |
 | `console` | **Ignored** if sent. New entries are always `INSIGHTS` (an admin tab needs a screen built in code, so those come from migrations); an existing entry's console never changes |
 
@@ -525,12 +527,34 @@ screen with no way back short of editing the database. For these entries `DELETE
 `PUT` with `isActive: false` is `409 ADMIN_MENU_PROTECTED`, and `PUT` with a different `path` is `409
 ADMIN_MENU_PROTECTED`. Their **label, icon and sort order stay editable**.
 
+> **Planned — Milestone 9b. Not implemented yet;** this is the agreed design, written first (docs-first). `PUT /admin/v1/menus/order`, its errors, the `MENU_ORDER_UPDATED` audit and the end-of-list default for a new entry arrive with the code PR.
+
+**Arranging: `PUT /admin/v1/menus/order`.** Sets the order of **one console's** entries in a single call — what the
+Menus screen's drag-and-drop saves. The body is the **complete** ordered list for that console, never a partial move:
+
+```json
+{ "console": "INSIGHTS", "menuIds": ["<id of the first entry>", "<id of the second>", "..."] }
+```
+
+The service renumbers that console's `sort_order` to `1..n` in the order given, in one transaction, and answers
+`200` with the full catalog (the same list as `GET /menus`) so the caller can show the result. The admin console's
+own tabs can be arranged too (it only changes the order of this console's sidebar); the protection rules above
+don't apply to order. Saving the order it already has succeeds.
+
+| Status | Code | Cause |
+|---|---|---|
+| `400` | `VALIDATION_ERROR` | `console` missing or not `INSIGHTS` / `ADMIN`; `menuIds` missing or containing a duplicate |
+| `409` | `MENU_ORDER_OUTDATED` | `menuIds` is not exactly that console's current set of entries: one was added, deleted or belongs to the other console since the caller loaded the list. Nothing is changed; the caller reloads and arranges again |
+
+The exact-set rule is deliberate: an entry another admin adds while you are dragging is never silently dropped or
+sent to a stale position. Audits `MENU_ORDER_UPDATED` (the console and the ordered ids before and after).
+
 **Deactivate vs delete.** Deactivating (`PUT` with `isActive: false`) keeps the entry in the catalog and **keeps its
 role assignments**: it simply stops appearing in `GET /me/menus` for everyone, and activating it again restores it
 for the same roles. `DELETE` is permanent and removes the entry **and exactly its own `role_menus` rows** — every
 role that held it loses it, nothing else changes, the roles themselves stay (`204`).
 
-Audits `MENU_CREATED` / `MENU_UPDATED` (before/after) and `MENU_DELETED` (the entry plus
+Audits `MENU_CREATED` / `MENU_UPDATED` (before/after), `MENU_ORDER_UPDATED` and `MENU_DELETED` (the entry plus
 `roleAssignmentsRemoved`, how many roles lost it). Like everything under `/admin/v1` except `/me` and `/health`,
 these need `SUPER_ADMIN`.
 
